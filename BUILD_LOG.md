@@ -75,3 +75,11 @@ These are the non-obvious fixes discovered during the build. Recorded so the env
 - **Stage 5 — first end-to-end detection test:** run `Invoke-AtomicTest T1087.001` on the Windows endpoint while tailing `/var/ossec/logs/alerts/alerts.log` on Blue, to confirm the full attack → Sysmon → agent → SIEM pipeline.
 - Verify the Kali/CALDERA red side after the host was rebooted (server is not set to auto-start).
 - Begin the research phase: Sigma rules → Wazuh local rules, ATT&CK Navigator coverage layers, alert export to Python for Random Forest / XGBoost triage modelling.
+
+## Update - host disk incident & lab hardening (2026-07-15)
+
+Host C: drive filled to under 500 MB free, which caused the Blue VM's virtual disk (.vdi) to become detached from its VirtualBox storage controller. Blue failed to boot with "could not read from boot medium". No data was lost - the .vdi file was intact, and re-attaching it under Controller: SATA restored the VM fully. Freed ~97 GB of host space by uninstalling non-essential software.
+
+All three VMs were then re-verified operational post-incident (Wazuh dashboard, Windows Wazuh agent active, CALDERA server healthy, Sandcat agent redeployed) and VirtualBox snapshots were taken of each as clean restore points.
+
+Note: the CALDERA Sandcat agent runs as a transient hidden process, not a service, so it does not persist across Windows reboots and must be redeployed when starting a red-team session. The Wazuh agent, installed as a Windows service (WazuhSvc), does persist and auto-starts.
