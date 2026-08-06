@@ -1,0 +1,11 @@
+﻿session_id,type,technique_id,technique_name,atomic_test_numbers,window_start,window_end,operator_context,defender_realtime_off,notes
+20260806-074607-benign-r1,benign,T1082,,"",2026-08-06 07:46:07,2026-08-06 07:46:35,interactive-admin,False,
+20260806-074818-benign-r2,benign,T1082,,"",2026-08-06 07:48:18,2026-08-06 07:49:01,interactive-admin,False,
+20260806-075036-benign-r3,benign,T1082,,"",2026-08-06 07:50:36,2026-08-06 07:51:01,interactive-admin,False,
+20260806-075322-benign-r4,benign,T1082,,"",2026-08-06 07:53:22,2026-08-06 07:54:10,interactive-admin,False,
+20260806-075709-benign-r5,benign,T1082,,"",2026-08-06 07:57:10,2026-08-06 07:58:34,interactive-admin,False,
+20260806-080048-benign-r1,benign,T1087.001,,"",2026-08-06 08:00:48,2026-08-06 08:00:59,interactive-admin,False,
+20260806-080359-benign-r2,benign,T1087.001,,"",2026-08-06 08:03:59,2026-08-06 08:04:10,interactive-admin,False,
+20260806-080614-benign-r3,benign,T1087.001,,"",2026-08-06 08:06:14,2026-08-06 08:06:25,interactive-admin,False,
+20260806-080802-benign-r4,benign,T1087.001,,"",2026-08-06 08:08:02,2026-08-06 08:08:08,interactive-admin,False,
+20260806-080944-benign-r5,benign,T1087.001,,"",2026-08-06 08:09:44,2026-08-06 08:09:54,interactive-admin,False,

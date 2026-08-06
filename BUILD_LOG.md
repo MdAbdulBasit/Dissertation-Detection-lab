@@ -47,6 +47,10 @@ Three virtual machines on a single host, connected on an isolated internal netwo
 - Atomic Red Team (Invoke-AtomicRedTeam) with `C:\AtomicRedTeam` and `C:\Users\Public` added to Defender exclusions.
 - Wazuh agent 4.14.6, manager set to 10.10.10.10, enrolled via `agent-auth.exe` and running.
 - CALDERA Sandcat agent (`splunkd.exe`) in `C:\Users\Public`, group `red`.
+- **VirtualBox Guest Additions installed** — `VBoxService` confirmed `Running` 2026-08-06. Was installed
+  during initial VM setup but never recorded here, which led to it being assumed absent. No shared
+  folders were defined against it, so `\\VBOXSVR\<name>` returned *System error 53* until the `lab`
+  share was added (see PREFLIGHT_CHECKLIST.md §7).
 - Windows Defender Tamper Protection and real-time protection disabled — a deliberate lab decision so that emulated techniques execute and are caught by the detection pipeline rather than pre-empted by Defender. (This should be stated explicitly in the dissertation methodology.)
 
 ### Kali (red team)
@@ -72,9 +76,17 @@ These are the non-obvious fixes discovered during the build. Recorded so the env
 
 ## 5. Next steps
 
-- **Stage 5 — first end-to-end detection test:** run `Invoke-AtomicTest T1087.001` on the Windows endpoint while tailing `/var/ossec/logs/alerts/alerts.log` on Blue, to confirm the full attack → Sysmon → agent → SIEM pipeline.
-- Verify the Kali/CALDERA red side after the host was rebooted (server is not set to auto-start).
-- Begin the research phase: Sigma rules → Wazuh local rules, ATT&CK Navigator coverage layers, alert export to Python for Random Forest / XGBoost triage modelling.
+Superseded — see **`PROJECT_PLAN.md`** for the current plan (housekeeping, sample-size decision,
+remaining 14 techniques batched by Sysmon event ID, and the analysis/write-up phases).
+
+Stage 5 (first end-to-end detection test) is **complete** as of 2026-08-06: T1087.001 tests 8, 9, 10
+detonated with UTC-bracketed windows, rule `100200` confirmed firing at level 10, 10 attack / 4 benign
+alerts recorded. Remaining from the original list:
+
+- Verify the Kali/CALDERA red side after host reboots (server is not set to auto-start). Needed for
+  T1105 only.
+- Research phase: Sigma → Wazuh rules, ATT&CK Navigator coverage layers, alert export to Python for
+  Random Forest / XGBoost triage modelling.
 
 ## Update - host disk incident & lab hardening (2026-07-15)
 

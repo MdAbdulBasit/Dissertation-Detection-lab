@@ -1,0 +1,6 @@
+﻿session_id,type,technique_id,technique_name,atomic_test_numbers,window_start,window_end,operator_context,defender_realtime_off,notes
+20260806-081744-benign-r1,benign,T1082,,"",2026-08-06 08:17:44,2026-08-06 08:18:07,interactive-admin,True,
+20260806-081908-benign-r2,benign,T1082,,"",2026-08-06 08:19:08,2026-08-06 08:19:16,interactive-admin,True,
+20260806-082104-benign-r3,benign,T1082,,"",2026-08-06 08:21:04,2026-08-06 08:21:27,interactive-admin,True,
+20260806-082254-benign-r4,benign,T1082,,"",2026-08-06 08:22:54,2026-08-06 08:23:09,interactive-admin,True,
+20260806-082433-benign-r5,benign,T1082,,"",2026-08-06 08:24:33,2026-08-06 08:24:41,interactive-admin,True,

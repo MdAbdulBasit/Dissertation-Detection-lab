@@ -1,0 +1,124 @@
+title: System Information Discovery via Native Utilities, WMIC, Registry and PowerShell
+id: 4b7e9d21-6f38-4c05-8e1a-2d9f5c7b0a63
+status: experimental
+description: >
+  Detects host and operating-system enumeration through the four mechanisms exercised by the
+  Atomic Red Team T1082 test set: single-purpose native utilities (systeminfo, hostname), WMIC host
+  queries, registry reads of host-identity values, and PowerShell cmdlets / WMI classes.
+
+  Written for the MSc dissertation lab as a detection-as-code artefact; translated to Wazuh local
+  rules 100230-100233. Unlike T1087.001 - where the Wazuh default detected the activity but only at
+  parent-technique precision - stock Wazuh detected T1082 ZERO times across five detonation windows
+  and fourteen atomic tests. It instead raised generic execution rules that attribute the activity to
+  T1087 Account Discovery and T1059.003 Windows Command Shell: the wrong technique and the wrong
+  tactic. These rules are the corrective, and that misattribution is the measured finding they answer.
+references:
+  - https://attack.mitre.org/techniques/T1082/
+  - https://github.com/redcanaryco/atomic-red-team/blob/master/atomics/T1082/T1082.md
+author: Abdul Basit Mohammed (c5038891), Sheffield Hallam University
+date: 2026/08/06
+tags:
+  - attack.discovery
+  - attack.t1082
+logsource:
+  product: windows
+  category: process_creation
+detection:
+  # 100230 - single-purpose utilities. No command-line condition: these tools do one thing.
+  selection_native_utility:
+    OriginalFileName:
+      - 'systeminfo.exe'
+      - 'hostname.exe'
+
+  # 100231 - WMIC is multi-purpose, so the alias must be constrained or the rule fires on
+  # unrelated administration (process, service, share, product management).
+  selection_wmic:
+    OriginalFileName: 'wmic.exe'
+  selection_wmic_alias:
+    CommandLine|contains:
+      - ' os '
+      - ' bios '
+      - ' computersystem '
+      - ' csproduct '
+      - ' diskdrive '
+      - ' qfe '
+      - ' environment '
+
+  # 100232 - reg.exe likewise. Constrained to host-identity values rather than key paths, which
+  # keeps the pattern readable and avoids backslash-escaping errors in the Wazuh translation.
+  selection_registry:
+    OriginalFileName: 'reg.exe'
+  selection_registry_value:
+    CommandLine|contains:
+      - 'MachineGuid'
+      - 'CurrentBuildNumber'
+      - 'ProductName'
+      - 'SystemBiosVersion'
+      - 'VideoBiosVersion'
+      - 'International'
+
+  # 100233 - closes the cmdlet blind spot. Rule 100200 keys on net.exe and detected nothing from
+  # atomic T1087.001-9's Get-LocalUser / Get-LocalGroup, so a purely PowerShell adversary evaded it.
+  # The same gap applies to T1082 tests 37 and 38.
+  selection_powershell:
+    OriginalFileName|startswith: 'powershell'
+  selection_powershell_cmdlet:
+    CommandLine|contains:
+      - 'Get-ComputerInfo'
+      - 'Get-WinSystemLocale'
+      - 'Get-PSDrive'
+      - 'Win32_OperatingSystem'
+      - 'Win32_ComputerSystem'
+      - 'Win32_BIOS'
+      - 'Win32_Processor'
+
+  condition: >
+    selection_native_utility
+    or (selection_wmic and selection_wmic_alias)
+    or (selection_registry and selection_registry_value)
+    or (selection_powershell and selection_powershell_cmdlet)
+fields:
+  - Image
+  - OriginalFileName
+  - CommandLine
+  - ParentImage
+  - ParentCommandLine
+  - User
+falsepositives:
+  - Routine administrative inventory and asset-management tooling
+  - Helpdesk troubleshooting (systeminfo and hostname are among the first commands an admin runs)
+  - Monitoring and configuration-management agents collecting host facts
+  - >
+    Measured in this lab: the benign mirror fires rule 92032 alongside the attack class, so this
+    activity is genuinely not separable by rule logic alone. That is the intended result - it is what
+    the ML triage layer exists to resolve, not a defect in the rule.
+level: medium
+
+# ---------------------------------------------------------------------------
+# LEVEL RATIONALE
+#
+# Wazuh level 8, against 10 for T1087.001. Both are Discovery, but host enumeration is far more
+# common in routine administration than account enumeration, so a lower level is proportionate.
+# Severity here is a deliberate choice, not a copy of the previous rule.
+#
+# KNOWN LIMITATION OF 100233
+#
+# It sees cmdlets only when passed via -Command or -File. Interactive cmdlet use creates no new
+# process, so EID 1 never fires and the rule cannot match. Full coverage requires PowerShell Script
+# Block Logging (EID 4104), which this endpoint's own SCA scan reports as disabled (CIS Win10
+# v4.0.0, "Ensure 'Turn on PowerShell Script Block Logging' is set to 'Enabled'"). Enabling it is an
+# evidence-backed recommendation rather than an assumption.
+#
+# WAZUH TRANSLATION
+#
+# Deployed as four separate rules rather than one, because a single broad rule would repeat the
+# precision defect recorded in RULE_ID_REGISTER.md note 1. See wazuh_rules/local_rules.xml for the
+# deployed XML, and note 2 in the register for the deployment and verification checklist.
+#
+# Chain from sysmon_eid1_detections - the group Sysmon EID 1 events land in AFTER matching a built-in
+# detection rule - NOT sysmon_event1. Verify against the `groups` field of a real event in Discover.
+#
+# ⚠️ The OriginalFileName values are asserted from PE version resources and have not yet been
+# observed in this lab's telemetry. Confirm every rule fires after deployment. A rule that silently
+# never matches is indistinguishable from a technique that is not detected.
+# ---------------------------------------------------------------------------

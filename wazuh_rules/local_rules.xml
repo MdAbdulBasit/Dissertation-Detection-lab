@@ -1,0 +1,132 @@
+<!--
+  Wazuh custom rules — MSc dissertation detection lab
+  Canonical copy. Deploys to /var/ossec/etc/rules/local_rules.xml on Blue (10.10.10.10).
+
+  Rule IDs are allocated in RULE_ID_REGISTER.md. Never invent an ID — Wazuh uses the FIRST
+  occurrence of a duplicate and silently ignores the rest.
+
+  After deploying:
+    sudo /var/ossec/bin/wazuh-analysisd -t      # must be clean
+    sudo systemctl restart wazuh-manager
+
+  Chain child rules from sysmon_eid1_detections — the group Sysmon EID 1 events land in AFTER
+  matching a built-in detection rule. NOT sysmon_event1. Verify against the `groups` field of a
+  real event in Discover.
+-->
+
+<group name="attack,discovery,local,">
+
+  <!--
+    T1087.001 Local Account Discovery via net.exe
+    Custom rule ID 100200 | level 10
+
+    Default Wazuh rule 92031 detects this at level 3 and maps it to the PARENT technique T1087.
+    This rule adds sub-technique precision (T1087.001) at proportionate severity. That contrast is
+    the dissertation's core argument in miniature.
+
+    Two conditions, ANDed:
+      1. originalFileName is net.exe or net1.exe — harder to evade than matching the image path,
+         since renaming the binary does not change the PE version resource.
+      2. commandLine contains an account/group enumeration subcommand.
+
+    Condition 2 was added after review. Without it the rule fired on every net.exe invocation
+    (net use, net start, net view, net share) and mapped all of them to T1087.001 — imprecise in
+    exactly the dimension the thesis claims to improve, and it would have inflated the positive
+    class in the ML dataset with routine drive mappings.
+  -->
+  <rule id="100200" level="10">
+    <if_group>sysmon_eid1_detections</if_group>
+    <field name="win.eventdata.originalFileName" type="pcre2">(?i)net1?\.exe</field>
+    <field name="win.eventdata.commandLine" type="pcre2">(?i)\s+(user|localgroup|group|accounts)\b</field>
+    <description>T1087.001 Local Account Discovery via net.exe</description>
+    <mitre>
+      <id>T1087.001</id>
+    </mitre>
+  </rule>
+
+  <!--
+    ===================================================================================================
+    T1082 System Information Discovery
+    Custom rule IDs 100230-100233 | level 8
+
+    MEASURED BASELINE (2026-08-06, 5 detonation windows, 14 atomic tests, 146 alerts):
+    stock Wazuh detected T1082 ZERO times. What fired instead was generic execution telemetry:
+        92052  level 4  cmd.exe by abnormal parent            -> T1059.003
+        92032  level 3  Suspicious Windows cmd shell exec     -> T1087 + T1059.003
+        92027  level 4  Powershell spawned powershell         -> T1059.001
+    So the default ruleset does not merely lose precision on T1082 - it MISATTRIBUTES the activity to
+    T1087 Account Discovery and T1059.003 Command Shell, i.e. the wrong technique AND the wrong tactic
+    (Execution rather than Discovery). An analyst following those alerts investigates the wrong
+    behaviour. That is a stronger finding than T1087.001's parent-only mapping, and these rules are the
+    corrective.
+
+    LEVEL RATIONALE: 8, against 10 for T1087.001. Both are Discovery, but host enumeration
+    (systeminfo, hostname, OS version) is far more common in routine administration than account
+    enumeration, so a lower level is proportionate. Severity is a deliberate, defensible choice here,
+    not a copy of the previous rule.
+
+    DESIGN, following the lesson recorded in RULE_ID_REGISTER.md note 1: match on originalFileName
+    (survives binary renaming, since the PE version resource is unchanged) AND constrain the command
+    line wherever the tool is multi-purpose. wmic and reg.exe do many things that are not discovery;
+    systeminfo and hostname do exactly one thing each and need no command-line condition.
+
+    ⚠️ VERIFY BEFORE TRUSTING: originalFileName values are asserted from the PE version resources, not
+    yet observed in this lab's telemetry. Detonate T1082 and confirm each rule fires. If 100230 does
+    not fire, check the actual originalFileName in Discover and adjust - a rule that silently never
+    matches is indistinguishable from a technique that is not detected, which has already cost this
+    project a day.
+    ===================================================================================================
+  -->
+
+  <rule id="100230" level="8">
+    <if_group>sysmon_eid1_detections</if_group>
+    <field name="win.eventdata.originalFileName" type="pcre2">(?i)^(systeminfo|hostname)\.exe$</field>
+    <description>T1082 System Information Discovery via native host-information utility</description>
+    <mitre>
+      <id>T1082</id>
+    </mitre>
+  </rule>
+
+  <rule id="100231" level="8">
+    <if_group>sysmon_eid1_detections</if_group>
+    <field name="win.eventdata.originalFileName" type="pcre2">(?i)^wmic\.exe$</field>
+    <field name="win.eventdata.commandLine" type="pcre2">(?i)\b(os|bios|computersystem|csproduct|diskdrive|qfe|environment)\b</field>
+    <description>T1082 System Information Discovery via WMIC host query</description>
+    <mitre>
+      <id>T1082</id>
+    </mitre>
+  </rule>
+
+  <rule id="100232" level="8">
+    <if_group>sysmon_eid1_detections</if_group>
+    <field name="win.eventdata.originalFileName" type="pcre2">(?i)^reg\.exe$</field>
+    <field name="win.eventdata.commandLine" type="pcre2">(?i)(MachineGuid|CurrentBuildNumber|ProductName|SystemBiosVersion|VideoBiosVersion|International)</field>
+    <description>T1082 System Information Discovery via registry query for host identity</description>
+    <mitre>
+      <id>T1082</id>
+    </mitre>
+  </rule>
+
+  <!--
+    Closes the cmdlet blind spot found in T1087.001: rule 100200 keys on net.exe and detected nothing
+    from atomic T1087.001-9's Get-LocalUser / Get-LocalGroup, so a purely PowerShell adversary evaded
+    it entirely. The same gap applies to T1082 tests 37 and 38 (Get-WinSystemLocale, Get-PSDrive).
+
+    LIMITATION, and it is a real one: this only sees cmdlets passed on the command line via -Command
+    or -File. It cannot see cmdlets typed into an interactive session, because no new process is
+    created and EID 1 never fires. Full coverage requires PowerShell Script Block Logging (EID 4104) -
+    which this endpoint's own SCA scan reports as NOT enabled ("Ensure 'Turn on PowerShell Script Block
+    Logging' is set to 'Enabled'", CIS Win10 v4.0.0). Enabling it is a concrete, evidence-backed
+    recommendation for the dissertation rather than an assumption.
+  -->
+  <rule id="100233" level="8">
+    <if_group>sysmon_eid1_detections</if_group>
+    <field name="win.eventdata.originalFileName" type="pcre2">(?i)^powershell(\.exe)?$</field>
+    <field name="win.eventdata.commandLine" type="pcre2">(?i)(Get-ComputerInfo|Get-WinSystemLocale|Get-PSDrive|Win32_OperatingSystem|Win32_ComputerSystem|Win32_BIOS|Win32_Processor)</field>
+    <description>T1082 System Information Discovery via PowerShell cmdlet or WMI class</description>
+    <mitre>
+      <id>T1082</id>
+    </mitre>
+  </rule>
+
+</group>

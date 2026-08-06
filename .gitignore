@@ -1,0 +1,36 @@
+# Credentials and secrets — PHASE2 handover §2: keep passwords out of Git
+*.key
+*.pem
+*.p12
+*.pfx
+secrets*
+credentials*
+*password*
+.env
+
+# VM artefacts — never commit disk images
+*.vdi
+*.vmdk
+*.ova
+*.iso
+
+# Wazuh certs
+wazuh-certificates/
+*-certs.tar
+
+# Large raw exports — commit summarised/derived datasets, not multi-GB dumps
+data/raw/
+*.log
+alerts-*.json
+
+# Python / Jupyter
+__pycache__/
+.ipynb_checkpoints/
+venv/
+.venv/
+*.pyc
+
+# OS
+Thumbs.db
+desktop.ini
+.DS_Store
