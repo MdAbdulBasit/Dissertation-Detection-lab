@@ -120,6 +120,21 @@ EXCLUDED_GROUPS = {
 # 92200 and 92021 - including 92213 at level 15, the highest-severity alert in the entire dataset.
 HARNESS_FILE_MARKER = "__PSScriptPolicyTest"
 
+# Second harness artefact, found on T1059.001 (2026-08-07) and larger than the first.
+# AtomicTestHarnesses calls Add-Type, which compiles inline C#. That produces:
+#     powershell.exe -> C:\Users\<u>\AppData\Local\Temp\<rand>\<rand>.dll      (280 alerts)
+#     csc.exe        -> C:\Users\<u>\AppData\Local\Temp\<rand>\<rand>.cmdline  (140 alerts)
+# Both trip rule 92213 "Executable file dropped in folder commonly used by malware" at LEVEL 15.
+# That was 420 of 481 attack alerts - 87% of the class - against ZERO in benign, because the mirror
+# does not use the harness. A perfect class discriminator produced entirely by the test tooling.
+#
+# ⚠️ CAVEAT: csc.exe compilation is also a genuine adversary behaviour (T1027.004 Compile After
+# Delivery). This filter is scoped to the compiler's two-level temp scratch pattern rather than to
+# csc.exe generally, and in THIS lab every such event is harness-driven. An evaluation of T1027.004
+# would need this exclusion removed and re-justified.
+CSC_TEMP_ARTEFACT = re.compile(
+    r"\\AppData\\Local\\Temp\\[^\\]+\\[^\\]+\.(dll|cmdline|pdb|err|out|cs|tmp)$", re.I)
+
 # The Wazuh agent's own SCA module runs `net user` and `powershell secedit /export`. Command lines are
 # identical to the atomics', so discriminate on process lineage instead.
 SELF_MONITORING_IMAGES = {"secedit.exe"}
@@ -243,6 +258,13 @@ def classify_exclusion(alert):
     full_log = alert.get("full_log") or ""
     if HARNESS_FILE_MARKER.lower() in full_log.lower():
         return "harness:PSScriptPolicyTest"
+
+    # Collapse Wazuh's doubled backslashes BEFORE path matching. Omitting this is why the first version
+    # of this filter silently matched nothing: the field arrives as C:\\Users\\...\\Temp\\x\\y.dll, so a
+    # regex written with single separators never fires, and 420 harness alerts stayed in the dataset
+    # while the exclusion count read zero.
+    if target and CSC_TEMP_ARTEFACT.search(target.replace("\\\\", "\\")):
+        return "harness:AddType-csc-compilation"
 
     image = basename_lower(eventdata.get("image"))
     parent = basename_lower(eventdata.get("parentImage"))

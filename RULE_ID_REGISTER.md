@@ -25,7 +25,7 @@ sudo systemctl restart wazuh-manager
 | Block | Technique | Tactic | Sysmon EID | IDs used | Status |
 |-------|-----------|--------|------------|----------|--------|
 | 100200–100209 | T1087.001 Local Account Discovery | Discovery | 1 | **100200** | ✅ Deployed — see note 1 |
-| 100210–100219 | T1059.001 PowerShell | Execution | 1 | — | Not started |
+| 100210–100219 | T1059.001 PowerShell | Execution | 1 | **none** | ✅ **NO RULE NEEDED — default is correct. See note 5** |
 | 100220–100229 | T1059.003 Windows Command Shell | Execution | 1 | — | Not started |
 | 100230–100239 | T1082 System Information Discovery | Discovery | 1 | **100230, 100231, 100232, 100233** | 🟡 Written, not yet deployed — see note 2 |
 | 100240–100249 | T1033 System Owner/User Discovery | Discovery | 1 | **100240, 100241** | 🟡 Written, not yet deployed — see note 3 |
@@ -230,3 +230,32 @@ sudo systemctl restart wazuh-manager
 ```
 
 Smoke-test all three before recording anything.
+
+---
+
+### Note 5 — T1059.001: block `100210`–`100219` left EMPTY on purpose
+
+Baseline measured over 5+5 windows (atomics 6, 13–17): **61 attack / 15 benign**. **The default ruleset
+detects this technique correctly**, so no rule was written and the block stays unallocated.
+
+| Default rule | Maps to | Fires in |
+|--------------|---------|----------|
+| `92027` Powershell process spawned powershell instance | **T1059.001** | attack **and** benign (21 / 10) |
+| `92057` Powershell spawned a powershell process which executed a **base64 encoded command** | **T1059.001** | attack **and** benign (5 / 5) |
+| `92070` WMI created a powershell process | T1047 + T1059.001 | attack only — harness lineage |
+| `92071` WMI-created powershell executed a base64 encoded command | T1047 + T1059.001 | attack only — harness lineage |
+
+**Why writing a rule here would be wrong.** It would duplicate working detection and inflate the measured
+contribution of the custom ruleset. Same discipline as declining to write a `qwinsta` rule for T1033 —
+where the default is right, record it as right. Five techniques in, the custom ruleset has been shown
+necessary for four and unnecessary for one, and that ratio is far more credible than five for five.
+
+**Why this is the strongest case for the ML layer in the study.** `92057` explicitly detects base64
+obfuscation, maps to the correct technique, and **still fires on the benign mirror** — because the mirror
+invokes `-EncodedCommand` the way a scheduled task or deployment script does. Better rule logic cannot fix
+this: encoded PowerShell is genuinely used by both attackers and automation. The discriminator has to be
+context, which is precisely what the triage model is for.
+
+**Reserve the block anyway.** Atomics 10 (fileless), 11 (NTFS ADS) and 12 (remoting) were excluded from
+this pass because each needs distinct detection logic — script-block content, ADS parsing, WinRM. If a
+second T1059.001 pass covers them, `100210`+ is where those rules go.

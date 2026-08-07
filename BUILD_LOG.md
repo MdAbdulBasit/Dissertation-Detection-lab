@@ -47,6 +47,16 @@ Three virtual machines on a single host, connected on an isolated internal netwo
 - Atomic Red Team (Invoke-AtomicRedTeam) with `C:\AtomicRedTeam` and `C:\Users\Public` added to Defender exclusions.
 - Wazuh agent 4.14.6, manager set to 10.10.10.10, enrolled via `agent-auth.exe` and running.
 - CALDERA Sandcat agent (`splunkd.exe`) in `C:\Users\Public`, group `red`.
+- **AtomicTestHarnesses PowerShell module** — installed 2026-08-07 from the PowerShell Gallery via
+  `Invoke-AtomicTest T1059.001 -TestNumbers 13,14,15,16 -GetPrereqs`. Required by the
+  `ATHPowerShellCommandLineParameter` atomics (T1059.001 tests 13–16), which otherwise fail with
+  *"not recognized as the name of a cmdlet"* — a failure that looks identical to a technique going
+  undetected. Recorded here because it is a change to the endpoint's installed software and therefore
+  affects reproducibility. This is a one-time install, unlike WinPwn/PowerView/AdFind which download on
+  every execution and are excluded on those grounds.
+- **Endpoint RAM raised 3072 MB → 4096 MB** on 2026-08-07 to reduce the Sysmon→agent forwarding-lag tail.
+  Fast Startup disabled (`powercfg /h off`) after the RAM change sent the VM into Automatic Repair — a
+  hibernation resume image is invalid once the hardware profile changes.
 - **VirtualBox Guest Additions installed** — `VBoxService` confirmed `Running` 2026-08-06. Was installed
   during initial VM setup but never recorded here, which led to it being assumed absent. No shared
   folders were defined against it, so `\\VBOXSVR\<name>` returned *System error 53* until the `lab`

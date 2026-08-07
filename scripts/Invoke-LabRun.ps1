@@ -171,7 +171,24 @@ $BenignMirror = @{
     # NOTE: T1016's recorded data used the NARROW mirror; 100251/100252 are attack-only there and that
     # is documented as scope, not a result, in COVERAGE_TABLE.md.
     'T1016'     = { Invoke-ViaCmd 'ipconfig /all & route print & arp -a'; Start-Sleep 3; Invoke-ViaCmd 'net config workstation & netsh advfirewall firewall show rule name=all' }
-    'T1059.001' = { Invoke-ViaPowerShell 'Get-ChildItem C:\Windows\System32 | Select-Object -First 5; Test-NetConnection 10.10.10.10 -InformationLevel Quiet' }
+    # Widened 2026-08-07. The narrow mirror produced FIVE alerts against 61 real attack alerts, and
+    # covered neither -Command nor -EncodedCommand - the two paths the atomics exercise most.
+    #
+    # ⚠️ -EncodedCommand is in the mirror ON PURPOSE, and it is the most important line in this table.
+    # Base64-encoded PowerShell is treated as a hallmark of attack, but it is also routine in legitimate
+    # automation: scheduled tasks, SCCM and deployment scripts encode commands to avoid quoting problems.
+    # If the benign class never encodes anything, a model separates the classes on base64 alone and
+    # learns nothing about behaviour. Including it makes the classes confusable on the single strongest
+    # indicator, which is exactly what the triage layer has to resolve.
+    'T1059.001' = {
+        Invoke-ViaPowerShell 'Get-ChildItem C:\Windows\System32 | Select-Object -First 5 | Out-String'
+        Start-Sleep 3
+        Invoke-ViaPowerShell 'Get-Service | Select-Object -First 3 | Out-String'
+        Start-Sleep 3
+        # An administrator invoking an encoded command from an automation script.
+        $b64 = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes('Write-Host "scheduled inventory task"'))
+        Start-Process -FilePath 'powershell.exe' -ArgumentList '-NoProfile','-EncodedCommand',$b64 -NoNewWindow -Wait
+    }
     'T1059.003' = { Invoke-ViaCmd 'dir C:\Windows'; Start-Sleep 3; Invoke-ViaCmd 'tasklist' }
     'T1053.005' = { Invoke-ViaCmd 'schtasks /query /fo LIST' }
     'T1070.004' = { $t = "$env:TEMP\labtest.txt"; "x" | Out-File $t; Invoke-ViaCmd "del `"$t`"" }

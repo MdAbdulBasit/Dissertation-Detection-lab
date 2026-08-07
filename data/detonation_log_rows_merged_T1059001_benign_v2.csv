@@ -1,0 +1,6 @@
+﻿session_id,type,technique_id,technique_name,atomic_test_numbers,window_start,window_end,ruleset_phase,operator_context,defender_realtime_off,notes
+20260807-223432-benign-r1,benign,T1059.001,,"",2026-08-07 22:34:32,2026-08-07 22:34:41,baseline,interactive-admin,True,
+20260807-223531-benign-r2,benign,T1059.001,,"",2026-08-07 22:35:31,2026-08-07 22:35:42,baseline,interactive-admin,True,
+20260807-223736-benign-r3,benign,T1059.001,,"",2026-08-07 22:37:36,2026-08-07 22:37:48,baseline,interactive-admin,True,
+20260807-223827-benign-r4,benign,T1059.001,,"",2026-08-07 22:38:27,2026-08-07 22:38:36,baseline,interactive-admin,True,
+20260807-224020-benign-r5,benign,T1059.001,,"",2026-08-07 22:40:20,2026-08-07 22:40:36,baseline,interactive-admin,True,

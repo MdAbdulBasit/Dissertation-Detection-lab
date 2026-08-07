@@ -180,6 +180,44 @@ It is also a real finding in its own right: a maximum-severity default rule firi
 benign interpreter behaviour is exactly the alert-fatigue problem the triage layer exists to address.
 Report it as evidence, then exclude it from the dataset.
 
+### 1a. Rule 92213 again — `Add-Type` / `csc.exe` inline C# compilation ⚠️ largest artefact found
+
+Found on T1059.001, 2026-08-07, and bigger than the PSScriptPolicyTest case. `AtomicTestHarnesses` calls
+`Add-Type`, which compiles inline C#:
+
+| Creator | Target file | Alerts |
+|---------|-------------|--------|
+| `powershell.exe` | `…\AppData\Local\Temp\<rand>\<rand>.dll` | 280 |
+| `csc.exe` | `…\AppData\Local\Temp\<rand>\<rand>.cmdline` | 140 |
+
+Both trip rule **92213 at level 15**. That was **420 of 481 attack alerts — 87% of the class — against
+zero in benign**, because the mirror does not use the harness. A perfect class discriminator manufactured
+entirely by the test tooling.
+
+Filter on the compiler's two-level temp scratch pattern, **not** on `csc.exe` generally:
+
+```
+\\AppData\\Local\\Temp\\[^\\]+\\[^\\]+\.(dll|cmdline|pdb|err|out|cs|tmp)$
+```
+
+> ⚠️ **`csc.exe` compilation is also a real adversary behaviour** — T1027.004 Compile After Delivery. In
+> this lab every such event is harness-driven, but an evaluation of T1027.004 would need this exclusion
+> removed and re-justified.
+
+> ⚠️ **Collapse Wazuh's doubled backslashes before matching any path.** The field arrives as
+> `C:\\Users\\…\\Temp\\x\\y.dll`. The first version of this filter used single separators, matched
+> nothing, and reported an exclusion count of **zero** — no error, no warning, 420 harness alerts left in
+> the dataset. Caught only by re-checking whether rule 92213 had actually disappeared. **Verify the
+> outcome of a filter, never that it ran.**
+
+### 1b. WMI process lineage — rules 92070 / 92071
+
+`AtomicTestHarnesses` launches PowerShell **via WMI** so it can control the exact command line. Rules
+`92070` ("WMI created a powershell process") and `92071` ("a powershell process created by WMI executed a
+base64 encoded command") therefore fire only in the attack class and can never match a mirror that
+spawns directly. Both also map to **T1047 + T1059.001**, so they arguably describe a different technique.
+Exclude from separability claims; do not widen the mirror to chase them.
+
 ### 2. Rule 92031 / 100200 — Wazuh agent's own SCA module
 
 The agent's SCA module runs `net user` and `powershell secedit /export` on a schedule, under parent
