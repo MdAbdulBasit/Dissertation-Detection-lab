@@ -38,6 +38,9 @@ USAGE
 
 import argparse
 import csv
+import glob
+import gzip
+import io
 import json
 import re
 import sys
@@ -121,6 +124,36 @@ HARNESS_FILE_MARKER = "__PSScriptPolicyTest"
 # identical to the atomics', so discriminate on process lineage instead.
 SELF_MONITORING_IMAGES = {"secedit.exe"}
 SELF_MONITORING_PARENTS = {"wazuh-agent.exe"}
+
+
+# =====================================================================================================
+# ⚠️ alerts.json ROTATES DAILY. Wazuh moves the previous day's alerts into
+#     /var/ossec/logs/alerts/<YYYY>/<Mmm>/ossec-alerts-<DD>.json[.gz]
+# and starts a fresh alerts.json. Reading only the live file therefore silently loses every earlier
+# session: on 2026-08-07 an export covering 40 detonation windows returned alerts for ONE technique,
+# because T1082's and T1087.001's alerts from the previous day had already been archived. The windows
+# were all still present, so the output looked like "those techniques produced no alerts".
+#
+# --alerts accepts multiple paths and shell globs, and .gz archives are read transparently. Always pass
+# the archive directory as well as the live file when re-exporting across sessions.
+# =====================================================================================================
+
+def iter_alert_files(patterns):
+    """Expand globs, de-duplicate, and return files sorted oldest-first by name."""
+    seen, out = set(), []
+    for pat in patterns:
+        matches = sorted(glob.glob(pat)) or ([pat] if "*" not in pat else [])
+        for p in matches:
+            if p not in seen:
+                seen.add(p)
+                out.append(p)
+    return out
+
+
+def open_alert_file(path):
+    if path.endswith(".gz"):
+        return io.TextIOWrapper(gzip.open(path, "rb"), encoding="utf-8", errors="replace")
+    return open(path, encoding="utf-8", errors="replace")
 
 
 def parse_alert_ts(raw):
@@ -268,7 +301,13 @@ def report_lag(alerts_path, windows):
 def main():
     global POST_BUFFER          # must precede any reference to it in this function
     ap = argparse.ArgumentParser()
-    ap.add_argument("--alerts", default="/var/ossec/logs/alerts/alerts.json")
+    ap.add_argument("--alerts", nargs="+",
+                    default=["/var/ossec/logs/alerts/alerts.json",
+                             "/var/ossec/logs/alerts/*/*/ossec-alerts-*.json",
+                             "/var/ossec/logs/alerts/*/*/ossec-alerts-*.json.gz"],
+                    help="One or more alert files or globs. Defaults to the live alerts.json PLUS the "
+                         "rotated archives - alerts.json rotates daily, so the live file alone loses "
+                         "every earlier session.")
     ap.add_argument("--windows", default="detonation_log.csv")
     ap.add_argument("--out-dataset", default="labelled_alerts.csv")
     ap.add_argument("--out-summary", default="alert_counts.csv")
@@ -305,11 +344,26 @@ def main():
     total = wrong_agent = unparsable = 0
     excluded = Counter()
     net1_dropped = 0
+    # Wazuh's live alerts.json and the rotated archive can BOTH contain the same day's alerts, so
+    # globbing the archive directory alongside the live file double-counts. Observed 2026-08-07:
+    # T1033 baseline read 330 attack alerts instead of 165, exactly 2x, while older techniques whose
+    # archives exist in only one form were unaffected - so the inflation was silent and technique-
+    # specific. Deduplicate on the alert's own unique id rather than trusting the file set.
+    seen_ids = set()
+    dup_dropped = 0
     rows = []
     # (technique, class, rule_id) -> count ; class is 'attack' / 'benign' / 'unlabelled'
     summary = defaultdict(Counter)
 
-    with open(args.alerts, encoding="utf-8", errors="replace") as fh:
+    alert_files = iter_alert_files(args.alerts)
+    if not alert_files:
+        sys.exit(f"No alert files matched: {args.alerts}")
+    print(f"\nReading {len(alert_files)} alert file(s):")
+    for p in alert_files:
+        print(f"  {p}")
+
+    for path in alert_files:
+      with open_alert_file(path) as fh:
         for line in fh:
             line = line.strip()
             if not line:
@@ -321,6 +375,16 @@ def main():
                 continue
 
             total += 1
+
+            # Alert id is unique per alert (e.g. "1785998198.5644897"). Fall back to a composite key
+            # if it is ever absent.
+            aid = alert.get("id") or (
+                f"{alert.get('timestamp','')}|{dig(alert,'rule','id',default='')}|{alert.get('full_log','')[:200]}"
+            )
+            if aid in seen_ids:
+                dup_dropped += 1
+                continue
+            seen_ids.add(aid)
 
             if dig(alert, "agent", "name") != TARGET_AGENT:
                 wrong_agent += 1
@@ -384,7 +448,10 @@ def main():
             for rule_id, n in summary[(tech, phase, cls)].most_common():
                 w.writerow([tech, phase, cls, rule_id, n])
 
-    print(f"\nRead {total} alerts; {wrong_agent} from other agents, {unparsable} unparsable")
+    print(f"\nRead {total} alerts; {dup_dropped} duplicates across files, "
+          f"{wrong_agent} from other agents, {unparsable} unparsable")
+    if dup_dropped:
+        print(f"  (the live alerts.json and a rotated archive overlap - deduplicated on alert id)")
     if excluded:
         print("\nExcluded by documented filters:")
         for reason, n in excluded.most_common():

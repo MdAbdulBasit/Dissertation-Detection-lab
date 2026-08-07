@@ -312,10 +312,19 @@ red-team session.
 
 ---
 
-## One-time cleanup (from lab-session handover §8.1 — do once, then delete this section)
+## One-time cleanup (lab-session handover §8.1) — ✅ CLOSED 2026-08-06
 
-- [ ] Confirm exactly one rule `100200` in `local_rules.xml`
-- [ ] Remove stale agent 001: `sudo /var/ossec/bin/manage_agents -r 001`
-- [ ] Snapshot Blue as `Blue-first-rule-working`
-- [ ] Snapshot Windows as `Win-sensors-verified`
-- [ ] Resolve the rule 100200 precision decision (`RULE_ID_REGISTER.md` note 1)
+- [x] Exactly one rule `100200` in `local_rules.xml` — `wazuh-analysisd -t` clean, no 7612 warning
+- [x] Stale agents removed — `agent_control -l` now lists only `000 bluesiem` and `005 win-endpoint`.
+      IDs 001–004 were all cleared during the enrolment-loop recovery. **The ID is not stable; check the
+      name.**
+- [x] Blue snapshotted — `Blue-2026-08-06-5rules-deployed-clock-ok`
+- [x] Windows snapshotted — `Win-2026-08-06-agent005-2techniques-done`
+- [x] Rule 100200 precision decision resolved — command-line condition deployed, `RULE_ID_REGISTER.md`
+      note 1 marked Fixed
+
+Two restore points per VM: the pre-today fallback and today's verified state. Superseded intermediates
+deleted.
+
+> ⚠️ **After restoring or booting from any snapshot, run §6a before detonating.** The 2026-08-06
+> snapshot/reboot cycle is what cost the endpoint agent its key, and nothing reported an error.

@@ -112,6 +112,27 @@ label = 0  OTHERWISE
 > contaminate each other. `Invoke-LabRun.ps1` gap defaults were raised from 60–120s to **180–300s** to
 > match, and it now warns below 150s.
 >
+> ### Gap reduced to 45–90s from T1016 onward — deliberate, and here is the reasoning
+>
+> The 180–300s gaps cost ~20 minutes per 5-repeat run, roughly 80 minutes per technique across both
+> phases. From **T1016** the gaps are **45–90s**, which is *below* the 120s buffer. That is a considered
+> trade-off, not an oversight:
+>
+> - **Between repeats of the same class it is harmless.** Both runs carry the same class label, so a late
+>   alert from run 1 landing in run 2's range is still labelled correctly. Only *per-window* attribution
+>   blurs, and per-window counts serve only as a sanity check — the coverage table uses class totals.
+> - **It actually loses fewer alerts.** With a gap wider than the buffer there is a dead zone between
+>   windows where late alerts match nothing and are labelled 0. Narrower gaps absorb them into the next
+>   window of the same class instead.
+> - **Between the attack run and the benign run it would be fatal**, since attack's late alerts would be
+>   labelled benign. That boundary stays wide: the two are separate invocations with operator time
+>   between them, and must never be less than ~3 minutes apart.
+>
+> ⚠️ **Gaps must match within a technique.** A phase run at 45–90s captures a higher proportion of its own
+> late alerts than one run at 180–300s, so mixing them inflates the later phase for reasons unrelated to
+> the rules. T1087.001, T1082 and T1033 were all captured at 180–300s in both phases; T1016 onward uses
+> 45–90s in both phases. **Do not compare totals across that boundary** — compare within a technique.
+>
 > **This is why the pipeline is worth building before the dataset.** The fault was invisible in the
 > lab — services healthy, clock synced, rules firing — and only appeared as "some windows have no
 > alerts" once counts were computed programmatically. Discovered on technique 2 of 15, it cost one
@@ -215,6 +236,38 @@ cherry-picking; a measured, justified one is a contribution.
 > hand, is not window-scoped, and silently breaks on null bytes. Extract from `alerts.json` or the
 > indexer, join to `data/detonation_log.csv` on the window columns, and apply the labelling rule
 > programmatically.
+
+### 3a. ⚠️ Multi-technique atomics break window-based labelling — found on T1016, 2026-08-07
+
+Window labelling assigns **every** alert inside a detonation window to **one** technique. That is only
+valid if the atomics in that window exercise only that technique. **Malware-emulation atomics do not.**
+
+Measured on T1016 with tests 1, 2, 4, 7, 9. Tests 4 (**TrickBot Style**) and 7 (**Qakbot Recon**) are
+realistic recon *sequences*, and the process images prove it:
+
+| Image | Count | Actual technique |
+|-------|-------|------------------|
+| `net.exe` | 30 | T1087 / T1135 depending on subcommand |
+| `whoami.exe` | 5 | **T1033** |
+| `nltest.exe` | 5 | **T1482** Domain Trust Discovery |
+| `ipconfig`, `arp`, `route`, `netstat`, `nbtstat`, `nslookup` | 55 | T1016 — the actual target |
+
+Consequently the custom rules fired **correctly** and looked wrong: `100200` matched `net user` as
+T1087.001 and `100240` matched `whoami` as T1033, both inside a window labelled T1016. Default rules did
+the same — `92034`/`92035` mapped `net view` to T1135, which is right for that command.
+
+**This is not a detection failure and must not be recorded as one.** It is an artefact of attributing a
+multi-technique test sequence to a single technique.
+
+**Rule adopted:** for per-technique precision measurement, use atomics that exercise **only** the target
+technique. Malware-emulation sequences are excluded from per-technique rows and are better suited to a
+separate chained-attack evaluation, where multi-technique attribution is the point rather than a
+confound. Record every such exclusion — a reviewer will ask why TrickBot and Qakbot were dropped, and
+"they span five techniques so the row would be uninterpretable" is a good answer.
+
+**Check for it on every technique:** if the attack class fires a *previous* technique's custom rule, the
+atomic almost certainly spans techniques. That signal is now visible in the export's class-exclusive
+listing.
 
 ### 4. `net.exe` → `net1.exe` duplication
 

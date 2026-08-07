@@ -50,6 +50,10 @@ param(
     # transformation error. Taking a string and splitting it here makes -File and in-session calls
     # behave identically. Accepts commas, semicolons or spaces.
     [string]$TestNumbers,
+    # 'baseline' = this technique's own custom rules are NOT yet deployed, so the run measures DEFAULT
+    # detection (the 'Default detected?' column). 'custom' = they are deployed ('Detected after?').
+    # Recorded per row so the export can split counts by phase without hand-patching the CSV.
+    [ValidateSet('baseline','custom')][string]$RulesetPhase = 'custom',
     [int]$Repeat = 1,
     # Raised from 60/120 on 2026-08-06. Measured Sysmon -> agent -> manager forwarding lag reached
     # p99 111s and max 169s, so the labelling buffer had to go to 120s - and the gap MUST exceed the
@@ -151,8 +155,22 @@ $BenignMirror = @{
     # instance"). Running them inline left 92027 attack-only (5 obs. in T1082, 1 in T1087.001) -
     # a smaller version of the same harness-fingerprint problem. Verified attack-only on 2026-08-06.
     'T1082'     = { Invoke-ViaCmd 'systeminfo & hostname'; Start-Sleep 4; Invoke-ViaCmd 'wmic os get Caption,Version,BuildNumber /value & reg query "HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion" /v ProductName'; Start-Sleep 3; Invoke-ViaPowerShell 'Get-WinSystemLocale; Get-PSDrive -PSProvider FileSystem' }
-    'T1033'     = { Invoke-ViaCmd 'whoami & whoami /groups' }
-    'T1016'     = { Invoke-ViaCmd 'ipconfig /all & route print & arp -a' }
+    # Widened 2026-08-07. The whoami-only mirror left custom rule 100241 (PowerShell identity
+    # enumeration) firing in the ATTACK class only - 10 alerts, zero benign - because the atomic set
+    # covers both the native and the cmdlet path while the mirror covered only the native one. A rule
+    # exclusive to one class is a discriminator the model can exploit without learning any behaviour.
+    # An administrator reading %USERNAME% or calling WindowsIdentity in a script is entirely ordinary,
+    # so both paths belong in the mirror.
+    # NOTE: T1033's recorded data was captured with the NARROW mirror; 100241 is attack-only there and
+    # that is documented as a limitation in COVERAGE_TABLE.md rather than retrofitted.
+    'T1033'     = { Invoke-ViaCmd 'whoami & whoami /groups'; Start-Sleep 3; Invoke-ViaPowerShell '[Security.Principal.WindowsIdentity]::GetCurrent().Name; $env:USERNAME; $env:USERDOMAIN' }
+    # Widened 2026-08-07 for the same reason as T1033: the narrow mirror left custom rules 100251
+    # (netsh enumeration) and 100252 (net config) firing in the ATTACK class only, because the atomics
+    # cover netsh and net config while the mirror did not. Checking firewall rules and workstation
+    # network config is ordinary administration and belongs in the mirror.
+    # NOTE: T1016's recorded data used the NARROW mirror; 100251/100252 are attack-only there and that
+    # is documented as scope, not a result, in COVERAGE_TABLE.md.
+    'T1016'     = { Invoke-ViaCmd 'ipconfig /all & route print & arp -a'; Start-Sleep 3; Invoke-ViaCmd 'net config workstation & netsh advfirewall firewall show rule name=all' }
     'T1059.001' = { Invoke-ViaPowerShell 'Get-ChildItem C:\Windows\System32 | Select-Object -First 5; Test-NetConnection 10.10.10.10 -InformationLevel Quiet' }
     'T1059.003' = { Invoke-ViaCmd 'dir C:\Windows'; Start-Sleep 3; Invoke-ViaCmd 'tasklist' }
     'T1053.005' = { Invoke-ViaCmd 'schtasks /query /fo LIST' }
@@ -223,7 +241,7 @@ if ($Repeat -gt 1 -and $MinGapSeconds -lt 150) {
 $dir = Split-Path $OutFile -Parent
 if (-not (Test-Path $dir)) { New-Item -ItemType Directory -Path $dir -Force | Out-Null }
 if (-not (Test-Path $OutFile)) {
-    'session_id,type,technique_id,technique_name,atomic_test_numbers,window_start,window_end,operator_context,defender_realtime_off,notes' |
+    'session_id,type,technique_id,technique_name,atomic_test_numbers,window_start,window_end,ruleset_phase,operator_context,defender_realtime_off,notes' |
         Out-File $OutFile -Encoding utf8
 }
 
@@ -252,8 +270,8 @@ for ($i = 1; $i -le $Repeat; $i++) {
     $end = Get-UtcStamp
     Write-Host "WINDOW END   (UTC): $end" -ForegroundColor Yellow
 
-    $row = '{0},{1},{2},{3},"{4}",{5},{6},{7},{8},' -f `
-        $sessionId, $Type, $TechniqueId, '', ($TestNumberList -join ';'), $start, $end, $context, $defenderOff
+    $row = '{0},{1},{2},{3},"{4}",{5},{6},{7},{8},{9},' -f `
+        $sessionId, $Type, $TechniqueId, '', ($TestNumberList -join ';'), $start, $end, $RulesetPhase, $context, $defenderOff
 
     $row | Out-File $OutFile -Append -Encoding utf8
     Write-Host $row -ForegroundColor Green

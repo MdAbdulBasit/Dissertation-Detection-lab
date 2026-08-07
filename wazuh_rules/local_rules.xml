@@ -129,4 +129,124 @@
     </mitre>
   </rule>
 
+  <!--
+    ===================================================================================================
+    T1033 System Owner/User Discovery
+    Custom rule IDs 100240-100241 | level 8
+
+    MEASURED BASELINE (2026-08-07, 5 windows, atomic tests 1/4/5/6/7, 165 attack alerts):
+    the default ruleset detects T1033 only PARTIALLY, and this is a third distinct failure mode -
+    different from T1087.001's parent-only mapping and T1082's outright misattribution.
+
+      * `qwinsta.exe` session enumeration IS correctly detected: default rule 92022
+        ("Gathered user information from Remote Desktop Service sessions") maps to T1033. 19 alerts.
+      * `whoami.exe` - the single most common way anyone establishes identity on a host - produces 15
+        alerts, ALL of them rule 92032, which maps to **T1087 + T1059.003**. So the most common T1033
+        behaviour is attributed to Account Discovery and Command Shell instead.
+      * The benign class fired NO T1033-mapped rule at all.
+
+    So the gap is not the technique as a whole; it is the dominant variant within the technique.
+
+    DELIBERATELY NOT WRITTEN, and each omission is itself a finding:
+      * No rule for `qwinsta` / `quser` session enumeration - default rule 92022 already maps it to
+        T1033 correctly. Adding one would duplicate correct behaviour and inflate the apparent
+        contribution of the custom ruleset. Where the default is right, say so.
+      * No rule for `wmic useraccount get /ALL` (present in atomic T1033-1). Enumerating local user
+        accounts is arguably **T1087.001**, not T1033. ART places it under T1033, so the atomic spans
+        two techniques - recorded as a limitation rather than papered over with a rule that would
+        mislabel it either way.
+    ===================================================================================================
+  -->
+
+  <rule id="100240" level="8">
+    <if_group>sysmon_eid1_detections</if_group>
+    <field name="win.eventdata.originalFileName" type="pcre2">(?i)^whoami\.exe$</field>
+    <description>T1033 System Owner/User Discovery via whoami</description>
+    <mitre>
+      <id>T1033</id>
+    </mitre>
+  </rule>
+
+  <!--
+    Closes the cmdlet path, as 100233 does for T1082. Atomic T1033-4 reads %USERNAME% via environment
+    variables and T1033-5 calls [Security.Principal.WindowsIdentity]::GetCurrent() - neither spawns a
+    distinctively named process, so nothing in the default ruleset attributes them to T1033.
+
+    Same limitation as 100233: this only sees cmdlets passed via -Command or -File. Interactive use
+    creates no new process and EID 1 never fires. Script Block Logging (EID 4104) is required for full
+    coverage and the endpoint's own SCA scan reports it disabled.
+  -->
+  <rule id="100241" level="8">
+    <if_group>sysmon_eid1_detections</if_group>
+    <field name="win.eventdata.originalFileName" type="pcre2">(?i)^powershell(\.exe)?$</field>
+    <field name="win.eventdata.commandLine" type="pcre2">(?i)(WindowsIdentity|env:USERNAME|env:USERDOMAIN|::UserName|Get-LocalUser)</field>
+    <description>T1033 System Owner/User Discovery via PowerShell identity enumeration</description>
+    <mitre>
+      <id>T1033</id>
+    </mitre>
+  </rule>
+
+  <!--
+    ===================================================================================================
+    T1016 System Network Configuration Discovery
+    Custom rule IDs 100250-100252 | level 8
+
+    MEASURED BASELINE (2026-08-07, 5 windows, atomic tests 1/2/9, 44 attack alerts):
+    NOTHING in the default ruleset maps to T1016. What fires is:
+        92032  L3  Suspicious Windows cmd shell execution   -> T1087 + T1059.003
+        92052  L4  cmd prompt by abnormal parent            -> T1059.003
+        92036  L?  binary started by a Windows cmd shell    -> T1059.003 + T1574.001
+    Same failure mode as T1082 - the activity is visible but attributed to Execution rather than
+    Discovery, and T1016 never appears. Four techniques measured so far, three distinct failure modes:
+    parent-only (T1087.001), misattribution (T1082, T1016), partial coverage (T1033).
+
+    TEST SET DELIBERATELY NARROWED. The first T1016 baseline used tests 1/2/4/7/9 and had to be
+    discarded: tests 4 (TrickBot Style) and 7 (Qakbot Recon) are multi-technique recon SEQUENCES that
+    also run net, whoami and nltest, so custom rules 100200 (T1087.001) and 100240 (T1033) fired
+    correctly inside a window labelled T1016 and single-technique attribution became impossible.
+    See LABELLING_SCHEME.md 3a. Tests 1, 2 and 9 exercise T1016 alone - confirmed empirically: the
+    re-run shows zero 1002xx rules in the attack class.
+
+    PRECISION NOTE ON netsh: `netsh advfirewall ... show` is discovery, but `netsh advfirewall set`
+    DISABLES the firewall and is T1562.004 Defense Evasion. 100251 therefore requires an enumeration
+    verb. A rule matching netsh broadly would map firewall tampering to Discovery - the same class of
+    error this project is measuring in the defaults.
+    ===================================================================================================
+  -->
+
+  <rule id="100250" level="8">
+    <if_group>sysmon_eid1_detections</if_group>
+    <field name="win.eventdata.originalFileName" type="pcre2">(?i)^(ipconfig|arp|route|nbtstat|netstat|nslookup)\.exe$</field>
+    <description>T1016 System Network Configuration Discovery via native network utility</description>
+    <mitre>
+      <id>T1016</id>
+    </mitre>
+  </rule>
+
+  <rule id="100251" level="8">
+    <if_group>sysmon_eid1_detections</if_group>
+    <field name="win.eventdata.originalFileName" type="pcre2">(?i)^netsh\.exe$</field>
+    <field name="win.eventdata.commandLine" type="pcre2">(?i)\bshow\b</field>
+    <description>T1016 System Network Configuration Discovery via netsh enumeration</description>
+    <mitre>
+      <id>T1016</id>
+    </mitre>
+  </rule>
+
+  <!--
+    `net config` reports workstation and server network configuration - T1016, distinct from the account
+    enumeration subcommands 100200 matches. The two conditions are disjoint by construction, so a single
+    net.exe invocation cannot fire both: 100200 requires user|localgroup|group|accounts, this requires
+    config. Verified on the T1016 re-run, where net.exe fired neither 100200 nor anything else.
+  -->
+  <rule id="100252" level="8">
+    <if_group>sysmon_eid1_detections</if_group>
+    <field name="win.eventdata.originalFileName" type="pcre2">(?i)^net1?\.exe$</field>
+    <field name="win.eventdata.commandLine" type="pcre2">(?i)\s+config\b</field>
+    <description>T1016 System Network Configuration Discovery via net config</description>
+    <mitre>
+      <id>T1016</id>
+    </mitre>
+  </rule>
+
 </group>
