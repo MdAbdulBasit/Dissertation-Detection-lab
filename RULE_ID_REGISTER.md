@@ -26,7 +26,7 @@ sudo systemctl restart wazuh-manager
 |-------|-----------|--------|------------|----------|--------|
 | 100200–100209 | T1087.001 Local Account Discovery | Discovery | 1 | **100200** | ✅ Deployed — see note 1 |
 | 100210–100219 | T1059.001 PowerShell | Execution | 1 | **none** | ✅ **NO RULE NEEDED — default is correct. See note 5** |
-| 100220–100229 | T1059.003 Windows Command Shell | Execution | 1 | — | Not started |
+| 100220–100229 | T1059.003 Windows Command Shell | Execution | 1 | **none** | ✅ **NO RULE NEEDED — default is correct. See note 6** |
 | 100230–100239 | T1082 System Information Discovery | Discovery | 1 | **100230, 100231, 100232, 100233** | 🟡 Written, not yet deployed — see note 2 |
 | 100240–100249 | T1033 System Owner/User Discovery | Discovery | 1 | **100240, 100241** | 🟡 Written, not yet deployed — see note 3 |
 | 100250–100259 | T1016 Network Config Discovery | Discovery | 1 | **100250, 100251, 100252** | 🟡 Written, not yet deployed — see note 4 |
@@ -259,3 +259,31 @@ context, which is precisely what the triage model is for.
 **Reserve the block anyway.** Atomics 10 (fileless), 11 (NTFS ADS) and 12 (remoting) were excluded from
 this pass because each needs distinct detection logic — script-block content, ADS parsing, WinRM. If a
 second T1059.001 pass covers them, `100210`+ is where those rules go.
+
+---
+
+### Note 6 — T1059.003: block `100220`–`100229` also left EMPTY on purpose
+
+Baseline over 5+5 windows (atomics 1, 2, 5, 6): **45 attack / 15 benign**. Three default rules map to
+T1059.003 and **two fire in both classes**:
+
+| Default rule | Maps to | Fires in |
+|--------------|---------|----------|
+| `92004` Powershell process spawned Windows command shell instance | **T1059.003** | attack **and** benign (5 / 10) |
+| `92032` Suspicious Windows cmd shell execution | T1087 + **T1059.003** | attack **and** benign (15 / 5) |
+| `92052` cmd prompt started by an abnormal process | **T1059.003** | attack only (10) |
+| `92005` | T1059 — **parent only** | attack only (5) |
+
+**The clearest false-positive case in the study.** `92004` and `92032` key on `cmd.exe` process lineage,
+so they fire in *every* technique that shells out — they appear in all six techniques' attack classes and
+in every benign mirror that uses `cmd.exe`. No rule refinement fixes this: a command shell looks identical
+whoever runs it. Two techniques now show the default is adequate, which is what makes the four gaps
+credible.
+
+**⚠️ A misdiagnosis worth recording.** `100240` (T1033 `whoami`) fired 5× in the attack class. I attributed
+that to multi-technique atomic test 3 and re-ran with tests 1, 2, 5, 6 — **the contamination was
+identical**. T1059.003 is a *container* technique: a shell must execute something, and the payload
+(`whoami`, `wscript` running a `.vbs` → T1059.005) carries its own mapping. No test selection avoids it.
+The T1016 precedent did not transfer, because there the offending atomics were optional malware
+emulations that could simply be dropped. See `LABELLING_SCHEME.md` §3b — Execution techniques are
+structurally different from Discovery techniques for per-technique attribution.

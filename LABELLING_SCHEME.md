@@ -307,6 +307,41 @@ confound. Record every such exclusion — a reviewer will ask why TrickBot and Q
 atomic almost certainly spans techniques. That signal is now visible in the export's class-exclusive
 listing.
 
+### 3b. Execution techniques are structurally multi-technique — and no test selection fixes it
+
+Found on T1059.003, 2026-08-07, after a re-run that failed to fix the problem.
+
+The T1059.003 baseline fired custom rule `100240` (T1033 `whoami`) five times, with images
+`cmd.exe` 30, `calc.exe` 5, `wscript.exe` 5, `whoami.exe` 5. Diagnosing this as one bad atomic —
+test 3, "Suspicious Execution via Windows Command Shell" — the test set was narrowed to 1, 2, 5, 6 and
+re-run. **The contamination was identical** (44 → 45 alerts, same images, same `100240` count). The
+diagnosis was wrong.
+
+**The actual cause is that T1059.003 is a container technique.** "Windows Command Shell" means *executing
+commands through cmd.exe* — but a command shell has to execute *something*, and whatever it executes has
+its own ATT&CK mapping. The atomics write batch and VBScript files whose payloads are `whoami` (T1033),
+`calc.exe`, and `wscript` running a `.vbs` (T1059.005, a sibling sub-technique). There is no test
+selection that avoids this, because a test that executes nothing would not exercise the technique.
+
+**This is a real distinction between technique families, not a lab defect:**
+
+| Family | Atomics are | Per-technique attribution |
+|--------|-------------|---------------------------|
+| **Discovery** (T1082, T1033, T1016, T1087.001) | self-contained — the discovery command *is* the technique | Clean, achievable with test selection |
+| **Execution** (T1059.001, T1059.003) | containers — the payload belongs to another technique | **Structurally impossible** to isolate |
+
+**Consequences to apply and to state in the methodology:**
+
+1. For Execution techniques, window labels identify *the technique under test*, not every alert in the
+   window. Sibling-technique alerts inside the window are **correctly detected behaviour**, not errors —
+   `100240` firing on the payload's `whoami` is the rule working.
+2. Report Execution-technique alert counts **split by whether the alert maps to the technique under test**,
+   rather than as a single total.
+3. Do **not** re-run to chase this. One re-run was spent on a wrong diagnosis; the T1016 precedent does not
+   transfer, because there the contamination came from *optional* malware-emulation atomics that could
+   simply be dropped.
+4. The `rule_mitre` column already carries what is needed to separate them at analysis time.
+
 ### 4. `net.exe` → `net1.exe` duplication
 
 Every `net` command produces two process-creation events and therefore two alerts. Deduplicate before
