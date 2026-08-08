@@ -453,6 +453,40 @@ class-exclusive rule as guilty until inspected**, which is why the exporter prin
 
 ---
 
+### 3d. ⚠️ Two silent data-integrity bugs found on the same merge, 2026-08-08
+
+Neither raised an error. Both produced plausible numbers.
+
+**(i) A substring test on a prose field dropped five good windows.** `load_windows()` skipped any row whose
+`notes` contained `SUPERSEDED` anywhere. The T1547.001 baseline benign re-run carries the note
+*"Replaces the 07:07–07:20 baseline benign windows, which are now superseded"* — describing what it
+**replaced**, not its own status — so all five were excluded and the class silently went from 5 windows
+to 1. Fixed to `startswith`. Verified safe at the time: all 62 genuinely superseded rows begin with the
+token, and exactly the 5 false drops did not.
+
+> **`notes` is prose written by a human. Never infer a control flag from prose appearing anywhere inside
+> it.** If a field drives behaviour it needs a position-anchored token or, better, its own column.
+
+**(ii) A CRLF line ending blanked the notes column on 16 rows.** Two earlier merge scripts derived the
+header by splitting the raw first line on `,`. After the `.gitattributes` renormalisation the file
+carries CRLF, so the final field name parsed as `notes\r`. Every value written under the real `notes`
+key landed nowhere — silently, for the **last column only**, on T1136.001 custom (10 rows) and
+T1547.001 baseline (6 rows). The notes are this project's methodology record, so losing them costs more
+than losing counts. Restored from the session transcript and marked as restored.
+
+> **Parse CSV with `csv.DictReader`, never by splitting a line.** The merge that used DictReader/DictWriter
+> was unaffected; the two that hand-rolled the header were not.
+
+**Both bugs share the shape that keeps recurring in this project** — alongside the +30s label buffer, the
+`csc.exe` filter that matched nothing, the `/del` regex, and the Windows Update artefact. None threw an
+error. Each produced a number that looked reasonable. The only reason any of them surfaced is that a
+count was checked against an independently known expectation: *five runs should give five windows.*
+
+> **Every merge and every export must be followed by a count assertion against what you know you ran.**
+> `assert len(rows) == 10` is worth more than any amount of reading the code.
+
+---
+
 ### 4. `net.exe` → `net1.exe` duplication
 
 Every `net` command produces two process-creation events and therefore two alerts. Deduplicate before

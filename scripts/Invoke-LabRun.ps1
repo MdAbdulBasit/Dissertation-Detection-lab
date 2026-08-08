@@ -280,6 +280,24 @@ $BenignMirror = @{
         # phase silently depend on the attack phase having run first - an ordering dependency between
         # classes is exactly the kind of hidden coupling that invalidates a comparison.
         Invoke-ViaPowerShell 'New-Item -Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\Policies\Explorer" -Force | Out-Null; New-Item -Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\Policies\Explorer\Run" -Force | Out-Null; Set-ItemProperty -Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\Policies\Explorer\Run" -Name LabBenignPolicy -Value "C:\Windows\System32\notepad.exe"'
+        Start-Sleep 3
+        # ⚠️ Fifth command added 2026-08-08 after designing rule 100290, BEFORE the custom phase ran.
+        #
+        # The four commands above all register a plain .exe path. Rule 100290 keys on the VALUE CONTENT -
+        # interpreters, encoded commands, temp paths, URLs - and ART's atomic 3 payload is
+        # `powershell.exe "IEX (New-Object Net.WebClient).DownloadString(...)"`. So 100290 would have come
+        # out attack-only, and for a reason that is not a real discriminator: an adversary can point a Run
+        # key at a plain .exe, and plenty of legitimate software registers an interpreter at logon.
+        #
+        # This is the FIFTH time a mirror narrower than the attack set would have manufactured a fake
+        # discriminator (see 100241, 100251, 100271, 100282) - but the first where the gap is the value's
+        # CONTENT rather than the MECHANISM. Mechanism gaps are visible when you list the atomics; content
+        # gaps only surface when you read your own rule's regex against your own mirror's data. Worth
+        # adding to the pre-run checklist: for every custom rule, ask which class can possibly match it.
+        #
+        # A management agent registering a PowerShell maintenance script at logon is entirely ordinary, so
+        # this belongs in the benign class on its merits, not merely to balance the numbers.
+        Invoke-ViaPowerShell 'Set-ItemProperty -Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\Run" -Name LabBenignSync -Value "powershell.exe -NoProfile -File C:\ProgramData\LabBenign\sync.ps1"'
     }
     'T1070.004' = { $t = "$env:TEMP\labtest.txt"; "x" | Out-File $t; Invoke-ViaCmd "del `"$t`"" }
     'T1560.001' = { $s = "$env:TEMP\labzip"; New-Item -ItemType Directory -Path $s -Force | Out-Null; "x" | Out-File "$s\a.txt"; Compress-Archive -Path "$s\a.txt" -DestinationPath "$env:TEMP\lab.zip" -Force; Remove-Item "$env:TEMP\lab.zip","$s" -Recurse -Force }

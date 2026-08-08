@@ -405,4 +405,131 @@
     </mitre>
   </rule>
 
+  <!--
+    ===================================================================================================
+    T1547.001 Registry Run Keys / Startup Folder
+    Custom rule IDs 100290-100294 | levels 8-12
+
+    MEASURED BASELINE (2026-08-08, 5+5 windows, atomics 1/3/7/12, 27 attack / 31 benign):
+    the SIXTH failure mode, and the first one caused by a severity setting rather than by missing or
+    wrong detection logic.
+
+        92300  level 0   targetObject matches ...CurrentVersion\Run       -> T1547.001   SILENT
+          92301  level 12  details matches \.(lnk|vbs|vba)                -> T1547.001
+          92302  level 6   image matches reg\.exe                         -> T1547.001
+          92303  level 12  details matches (VNC|tvnserver\.exe)           -> T1547.001
+
+    Level 0 in Wazuh means matched-but-not-emitted. So Wazuh owns a correctly-tagged T1547.001 rule
+    whose only job is to gate three narrow children. A Run value holding a plain .exe path, or
+    powershell.exe with an inline download cradle, written by anything other than reg.exe, matches
+    92300 and produces NOTHING.
+
+    THE DECISIVE MEASUREMENT is a contrast INSIDE the technique. Atomic 1 writes HKCU\...\Run via
+    reg.exe and alerts at level 6. Atomic 3 writes HKLM\...\RunOnce via PowerShell Set-ItemProperty and
+    produces zero T1547.001 alerts. Same persistence, same outcome at next logon, detected or invisible
+    depending only on which binary performed the write. Verified positively: the registry values were
+    confirmed present with reg query BEFORE cleanup, because a technique that predicts silence cannot
+    use "no alerts" as evidence the run worked.
+
+    AND THE ONE CORRECT RULE IS ANTI-DISCRIMINATIVE. 92302 fires 4 attack / 5 benign - more often on the
+    administrator than the attacker, because registering an updater at logon via reg.exe is exactly what
+    the benign mirror does. The sole correct detection in the default ruleset has a likelihood ratio
+    pointing the wrong way.
+
+    THREE INDEPENDENT GAPS in one technique:
+      (a) SEVERITY   - 92300 is silent for the general case               -> 100290, 100291
+      (b) PATH       - 92300 requires RUN immediately after CURRENTVERSION, so
+                       ...CurrentVersion\Policies\Explorer\Run (atomic 12) never reaches it. The
+                       alternation is unanchored, so RUNONCE and RUNONCEEX match by accident: the same
+                       regex is simultaneously too loose and too tight.  -> 100292
+      (c) DATA SOURCE- the Startup FOLDER variant is EID 11, not 13. 0860-sysmon_id_11.xml DOES see it:
+                       92200 (L6) matches [c-z]:\\(Windows\\Temp|Users).+\.(bat|cmd|lnk|...) and 92201
+                       (L9) adds image=powershell/cscript/wscript. But both map it to
+                       T1105 Ingress Tool Transfer + T1059 - Persistence read as Command and Control
+                       plus Execution.                                    -> 100293, 100294
+
+    ⚠️ ORDERING IS BY DESCENDING LEVEL, NOT BY LOAD ORDER OR ID. MEASURED, not assumed - an earlier
+    version of this comment asserted load order and was wrong. Three smoke-test observations, all
+    consistent, none consistent with load order:
+        100291 (L8)  displaced  92302 (L6)   on a reg.exe Run-key write
+        100294 (L10) displaced  92201 (L9)   on a powershell-created Startup .lnk
+        100290 (L12) displaced  100291 (L8)  on an interpreter payload
+    Among sibling children of one parent, the highest level wins. Consequences:
+
+      * 92302 IS DISPLACED. A reg.exe Run-key write now alerts as 100291 (L8), not 92302 (L6). The
+        levels are NOT being lowered to prevent this. Level 5 would hand the reg.exe case back to the
+        vendor, but choosing a severity to manipulate evaluation order rather than to express how
+        serious the behaviour is would be bad detection engineering. Autostart persistence is a level 8.
+        The displacement is reported instead: custom-phase T1547.001 counts must be split into alerts
+        RELABELLED from 92302 and alerts that are NEWLY VISIBLE, the same treatment T1136.001 needed.
+
+      * 100290 outranks 100291 by level, so the severity tier works regardless of file position. It is
+        still written first for readability.
+
+      * 100293 WAS REMOVED AS UNREACHABLE. It chained from 92201 (L9) with a Startup-folder condition,
+        but 100294 (L10) is 92201's sibling under 92200 and always wins for exactly those paths - so
+        92201 can never be the deepest match there and its child can never be reached. ID 100293 is
+        RETIRED - see RULE_ID_REGISTER note 9b. Do not reuse it.
+
+      * ⚠️ A REASONING ERROR, recorded because the method matters more than the conclusion. On seeing
+        the smoke test produce 100294 rather than 92201, I concluded that 92201 had never been matching
+        the Startup .lnk at all and that 92200 (L6) was the rule misattributing it to T1105 - and I
+        edited that "correction" into this comment. It was wrong. The smoke test ran AFTER 100294 was
+        deployed, so 92201 was already being outranked; the observation said nothing about how the
+        BASELINE had behaved. The measured phases settle it: 92201 fires 5 attack / 5 benign in
+        baseline and 0 / 0 in custom, while 100294 picks up exactly 5 / 5. 92201 WAS the misattributing
+        rule, the original analysis was correct, and the correction was the error.
+        GENERAL RULE: a post-deployment observation cannot be used to infer pre-deployment behaviour.
+        The baseline is the only evidence of what the default ruleset did, which is the entire reason
+        this project measures a baseline phase before writing anything.
+
+    ⚠️ BACKSLASHES ARE DOUBLED in Wazuh field values, so a literal backslash is \\\\ in these regexes.
+    This is the same trap that made the csc.exe exclusion in export_labelled_alerts.py silently match
+    nothing. The vendor rules above use the same convention - copy it, do not guess.
+    ===================================================================================================
+  -->
+
+  <rule id="100290" level="12">
+    <if_sid>92300</if_sid>
+    <field name="win.eventdata.details" type="pcre2">(?i)(powershell|pwsh|cmd\.exe|mshta|rundll32|regsvr32|wscript|cscript|certutil|bitsadmin|-enc\b|-encodedcommand|FromBase64|https?:|\\\\AppData\\\\|\\\\Temp\\\\|\\\\Users\\\\Public\\\\|\.(bat|cmd|ps1|vbs|vbe|js|jse|hta|scr)\b)</field>
+    <description>T1547.001 Run key persistence with interpreter or staged payload: $(win.eventdata.details)</description>
+    <mitre>
+      <id>T1547.001</id>
+    </mitre>
+  </rule>
+
+  <!-- The catch-all that removes the silence. No conditions beyond the parent: if 92300 matched, a Run
+       key was written, and that is worth an alert. Level 8 not 10 - installers and updaters register at
+       logon constantly, so severity is proportionate to how ordinary the act is, and the measured
+       both-classes behaviour of 92302 says plainly that this cannot be treated as a verdict. -->
+  <rule id="100291" level="8">
+    <if_sid>92300</if_sid>
+    <description>T1547.001 Autostart Run key written by $(win.eventdata.image)</description>
+    <mitre>
+      <id>T1547.001</id>
+    </mitre>
+  </rule>
+
+  <rule id="100292" level="10">
+    <if_group>sysmon_event_13</if_group>
+    <field name="win.eventdata.targetObject" type="pcre2">(?i)CURRENTVERSION\\\\(POLICIES\\\\EXPLORER\\\\RUN|EXPLORER\\\\USER SHELL FOLDERS)</field>
+    <description>T1547.001 Autostart via policy Run key or Shell Folder redirection: $(win.eventdata.targetObject)</description>
+    <mitre>
+      <id>T1547.001</id>
+    </mitre>
+  </rule>
+
+  <!-- 100293 RETIRED - unreachable. See the ordering note above and RULE_ID_REGISTER note 9b.
+       Do not reuse this ID; the register keeps retired numbers reserved so that a future reader
+       matching alert IDs against the register never finds a gap they have to guess about. -->
+
+  <rule id="100294" level="10">
+    <if_sid>92200</if_sid>
+    <field name="win.eventdata.targetFilename" type="pcre2">(?i)\\\\Start Menu\\\\Programs\\\\Startup\\\\</field>
+    <description>T1547.001 Startup folder persistence written by $(win.eventdata.image) (re-attributed from T1105)</description>
+    <mitre>
+      <id>T1547.001</id>
+    </mitre>
+  </rule>
+
 </group>

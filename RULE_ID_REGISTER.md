@@ -8,6 +8,23 @@ reason. This register pre-allocates a block per technique so IDs are never guess
 **Block size:** 10 IDs per technique — several techniques need more than one rule (different atomics,
 different Sysmon event types, or a broad rule plus a tightened variant).
 
+> ### ⚠️ Block reallocation, 2026-08-08 — T1547.001 ⇄ T1112
+>
+> T1547.001 was allocated `100260–100269`. Its rules were written into `100290–100299`, which the table
+> assigned to **T1112**, because I went straight to "the next free-looking block" instead of reading the
+> row for the technique I was working on. Not caught until the technique was deployed, smoke-tested and
+> both phases measured.
+>
+> **The blocks are swapped rather than the rules renumbered.** Renumbering would change rule IDs that are
+> already recorded in `labelled_alerts.csv` for a completed 5+5 custom phase, so either the measurement
+> is re-run or the dataset disagrees with the ruleset. T1112 has not started, so `100260–100269` is free
+> and the swap costs nothing. The allocation is an internal bookkeeping convention, not a constraint —
+> but a *silent* deviation from it would be exactly the kind of thing that makes a rule register
+> untrustworthy, so it is recorded here rather than quietly corrected.
+>
+> **Process fix:** the "before adding any rule" check below now starts with reading this table's row for
+> the technique, not just grepping for a free ID. A free ID and the *right* ID are different questions.
+
 **Before adding any rule:**
 ```bash
 sudo grep -c 'id="<NEW_ID>"' /var/ossec/etc/rules/local_rules.xml   # must return 0
@@ -30,10 +47,10 @@ sudo systemctl restart wazuh-manager
 | 100230–100239 | T1082 System Information Discovery | Discovery | 1 | **100230, 100231, 100232, 100233** | 🟡 Written, not yet deployed — see note 2 |
 | 100240–100249 | T1033 System Owner/User Discovery | Discovery | 1 | **100240, 100241** | 🟡 Written, not yet deployed — see note 3 |
 | 100250–100259 | T1016 Network Config Discovery | Discovery | 1 | **100250, 100251, 100252** | 🟡 Written, not yet deployed — see note 4 |
-| 100260–100269 | T1547.001 Registry Run Keys | Persistence | 13 | — | Not started |
+| 100260–100269 | **T1112 Modify Registry** *(reallocated — see below)* | Defense Evasion | 13 | — | Not started |
 | 100270–100279 | T1053.005 Scheduled Task | Persistence | 1 | **100270, 100271** | 🟡 Written, not yet deployed — see note 7 |
 | 100280–100289 | T1136.001 Create Local Account | Persistence | 1 / **Security 4720** | **100280, 100281, 100282, 100283** | ✅ Deployed + smoke-tested 2026-08-08 — see note 8 |
-| 100290–100299 | T1112 Modify Registry | Defense Evasion | 13 | — | Not started |
+| 100290–100299 | **T1547.001 Registry Run Keys** *(reallocated — see below)* | Persistence | **13 + 11** | **100290, 100291, 100292, 100294** · ~~100293 retired, ID reserved~~ | ✅ Deployed + measured 2026-08-08 — notes 9, 9a, 9b |
 | 100300–100309 | T1218.011 Rundll32 | Defense Evasion | 1 | — | Not started |
 | 100310–100319 | T1070.004 File Deletion | Defense Evasion | 11/23 | — | Not started |
 | 100320–100329 | T1003.001 LSASS Memory | Credential Access | 10 | — | Not started |
@@ -447,6 +464,81 @@ its baseline, not after.
 **Rules `100290`–`100291` stand as designed in note 9**, with one addition now justified by the data: a
 third rule for the Startup-folder file drop against EID 11 `targetFilename`, since that gap is real and
 separate. Numbering `100292`.
+
+#### Note 9b — custom phase result, and the ordering rule that changes how every count is read
+
+Deployed `100290` (L12), `100291` (L8), `100292` (L10), `100294` (L10). **`100293` written, then retired
+before the phase ran — see below. ID reserved, never reuse.**
+
+**Custom phase: 35 attack / 45 benign**, against baseline 27 / 35.
+
+| Rule | Lvl | base A/B | custom A/B | |
+|---|---|---|---|---|
+| `100290` | 12 | 0 / 0 | **5 / 5** | interpreter or staged payload in a Run value |
+| `100291` | 8 | 0 / 0 | **5 / 10** | catch-all — the silence, removed |
+| `100292` | 10 | 0 / 0 | **5 / 5** | `Policies\Explorer\Run` path gap |
+| `100294` | 10 | 0 / 0 | **5 / 5** | Startup-folder `.lnk` |
+| `92302` | 6 | 4 / 5 | **0 / 0** | displaced |
+| `92201` | 9 | 5 / 5 | **0 / 0** | displaced |
+
+**⭐ First technique with zero class-exclusive custom rules — 4 of 4 fire in both classes.** Every earlier
+technique stranded at least one rule in one class as a mirror artefact (`100241`, `100251`, `100271`,
+`100282`). The difference here is that the gap was **predicted from the rule's own regex before the run**
+and closed, rather than discovered in the export and caveated. That check — *for each new rule, which
+class can possibly match it?* — belongs in the pre-run routine permanently.
+
+The 5/10 on `100291` is the mirror working exactly as designed: the atomics write one plain-path Run
+value and one interpreter payload; the mirror writes two plain-path values and one interpreter payload.
+So `100290` lands 5/5 and `100291` lands 5/10.
+
+**⚠️ WAZUH EVALUATES SIBLING CHILD RULES BY DESCENDING LEVEL.** Measured across three independent
+observations, none consistent with load order or ID order:
+
+```
+100291 (L8)  displaced  92302  (L6)   reg.exe Run-key write
+100294 (L10) displaced  92201  (L9)   powershell-created Startup .lnk
+100290 (L12) displaced  100291 (L8)   interpreter payload
+```
+
+**This changes how every custom-phase count in this project must be read.** Of the 20 attack / 25 benign
+T1547.001-attributed alerts, **9 / 10 are RELABELLED** from `92302` and `92201`, and **11 / 15 are NEWLY
+VISIBLE**. Quoting 20/25 as new detection would overstate the contribution roughly twofold. Earlier
+techniques need re-checking for the same effect before their numbers are quoted in Chapter 4.
+
+**Levels were not lowered to dodge the displacement.** Setting `100291` to level 5 would hand the
+`reg.exe` case back to the vendor rule and make the comparison tidier. It would also mean **choosing a
+severity to control evaluation order rather than to express how serious the behaviour is**, which is bad
+detection engineering and would be dishonest in a study about detection quality. Autostart persistence
+is a level 8.
+
+**`100293` retired as unreachable.** It chained from `92201` (L9) with a Startup-folder condition, but
+`100294` (L10) is `92201`'s sibling under `92200` and always wins for exactly those paths, so `92201`
+can never be the deepest match there and its child can never fire. Dead code in a deployed ruleset is a
+defect; the ID stays reserved so anyone matching alerts against this register finds no unexplained gap.
+
+**⚠️ A REASONING ERROR, recorded in full because the method matters more than the conclusion.** On seeing
+the smoke test produce `100294` instead of `92201`, I concluded that `92201` had never matched the
+Startup `.lnk` at all, that `92200` was the real misattributing rule, and I edited that "correction" into
+the ruleset comments and this register. **It was wrong.** The smoke test ran *after* `100294` was
+deployed and already outranking `92201`; it could say nothing about how the baseline behaved. The
+measured phases settle it — `92201` 5/5 baseline → 0/0 custom, `100294` 0/0 → 5/5. The original analysis
+was right and the correction was the error.
+
+> **A post-deployment observation cannot be used to infer pre-deployment behaviour.** This is the entire
+> reason the protocol measures a baseline phase before a single rule is written, and I violated it in the
+> middle of the technique that most depends on it.
+
+**Vendor precision defect found in passing.** `92041` (L10, *"Value added to registry key has Base64-like
+pattern"*, mapped to **T1027 Obfuscated Files or Information**) fired on `C:\ProgramData\Smoke\viareg.exe`
+— a plain file path with nothing base64 about it. It sits at 4/5 and 5/5 across both phases and both
+classes: a level-10 alert asserting obfuscation that carries no information whatsoever. Worth citing
+alongside `92219` as evidence that vendor rule *precision*, not just vendor rule *coverage*, is part of
+the alert-fatigue problem.
+
+**⚠️ Deployed/repo divergence to reconcile at the next deployment.** The block pasted onto Blue carries
+the pre-correction ordering comment. Rule *behaviour* is identical — comments do not execute — but
+`wazuh_rules/local_rules.xml` in the repo is authoritative and the deployed copy should be refreshed
+wholesale when T1112's rules go in.
 
 ---
 

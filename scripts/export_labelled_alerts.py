@@ -225,7 +225,21 @@ def load_windows(path):
                 continue
             # Superseded rows have no usable telemetry behind them (clock fault, dead pipeline,
             # contaminated mirror). Including them would resurrect known-bad data.
-            if "SUPERSEDED" in (row.get("notes") or "").upper():
+            #
+            # ⚠️ MUST be startswith, not a substring search. Until 2026-08-08 this was
+            #     if "SUPERSEDED" in notes.upper()
+            # which drops any window whose note merely MENTIONS supersession. It bit immediately: the
+            # T1547.001 baseline benign re-run carries the note "Replaces the 07:07-07:20 baseline
+            # benign windows, which are now superseded" - describing what it replaced, not its own
+            # status - and all five perfectly good windows were silently excluded. The technique's
+            # baseline benign class went from 5 windows to 1 with no error and no warning.
+            #
+            # This is the same failure shape as the +30s label buffer and the csc.exe filter that
+            # matched nothing: a silent, plausible-looking wrong number. The notes field is prose
+            # written by a human, so a control flag must never be inferred from prose appearing
+            # anywhere inside it. Verified safe at the time of the change: all 62 genuinely superseded
+            # rows begin with the token, and exactly the 5 false drops did not.
+            if (row.get("notes") or "").strip().upper().startswith("SUPERSEDED"):
                 skipped += 1
                 continue
             try:
