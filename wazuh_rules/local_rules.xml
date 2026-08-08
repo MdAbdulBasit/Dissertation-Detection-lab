@@ -532,4 +532,143 @@
     </mitre>
   </rule>
 
+  <!--
+    ===================================================================================================
+    T1112 Modify Registry
+    Custom rule IDs 100260-100264 | levels 8-12
+
+    MEASURED BASELINE (2026-08-08, 5+5 windows, atomics 1/2/33/60, 55 attack / 41 benign):
+    the SEVENTH failure mode. Three default sources claim T1112 and not one of them can see a registry
+    modification when it happens:
+
+      (a) Wazuh FIM (594/597/598/750/751/752, L5). Fires only for paths in the agent's
+          <windows_registry> allow-list - 20 paths, EVERY ONE under HKEY_LOCAL_MACHINE, not one HKCU
+          entry - and only at the scheduled scan: <frequency>43200</frequency>, twelve hours, no
+          realtime registry option configured. A detonation window is ~20s plus a 120s buffer, so the
+          scan interval is about 360x the entire observation window. MEASURED: zero FIM alerts across
+          all ten windows, INCLUDING atomic 2, which writes to HKLM\...\CurrentVersion\Run - a path that
+          IS on the allow-list. Allow-list membership makes no observable difference at incident
+          timescales. Latency is the binding constraint, not scope.
+      (b) 92304-92306, which key on one key (Classes\Folder\shell\open\command) and carry T1112 only as
+          a secondary tag beside T1548.002. UAC-bypass rules, not registry rules.
+      (c) 91813/91814, which read PowerShell Script Block Logging (EID 4104). Verified disabled on this
+          endpoint by query, not assumed. They cannot fire.
+
+    LATENT COVERAGE: the rule exists, it is correctly aimed at registry modification, it does emit an
+    alert - and it cannot arrive in time to matter. Distinct from T1547.001's suppressed severity, where
+    the rule matched and emitted nothing at all.
+
+    ⚠️ THE ONE RULE THAT DOES FIRE IS A BROKEN REGEX. 92041 (L10, "Value added to registry key has
+    Base64-like pattern", mapped to T1027 + T1112) lives in 0800-sysmon_id_1.xml - it is a PROCESS
+    CREATION rule that never looks at the registry. It matches reg.exe command lines with:
+
+        (?i)add.+\/d\s+(")?(?:[A-Za-z\d+\/]{4})*(?:[A-Za-z\d+\/]{3}=|[A-Za-z\d+\/]{2}==)?
+
+    Every group after /d is * or ?, so ZERO repetitions satisfy the pattern. It matches any
+    `reg add ... /d <anything>` - verified, including `add x /d ` with nothing following. Consequences:
+      * It fired 30 attack / 15 benign, exactly one per `reg add` command issued (6 per attack run,
+        3 per benign run). It is a reg.exe execution counter wearing a base64 detection's description.
+      * T1027 Obfuscated Files is asserted falsely in all 45 cases.
+      * It is BLIND to PowerShell registry modification. Atomic 60 and the benign mirror both use
+        Set-ItemProperty, which creates no reg.exe process, so they produce nothing.
+    A defect of PRECISION, not coverage - and precision defects are the ones that generate alert
+    fatigue, because they fire constantly at level 10 while carrying no information.
+
+    DESIGN. Two groups of rules, doing two different jobs:
+
+      100260/100261/100262 detect on Sysmon EID 13, which is WRITER-AGNOSTIC. This is the substantive
+      fix: it closes the PowerShell blind spot that 92041 cannot see by construction, because EID 13
+      records the registry write itself rather than the process that issued it.
+
+      100263/100264 REPAIR 92041 rather than duplicating it, chaining via if_sid the way 100280 did for
+      60109. 100263 restores the precision the vendor regex intended (a real base64 test, minimum 16
+      characters) and keeps T1027. 100264 catches everything else and drops the false T1027 claim,
+      leaving T1112 alone. Together they turn a rule that is wrong 100% of the time into one that is
+      right about what it saw.
+
+    ⚠️ LEVEL ORDERING (see the T1547.001 note above): siblings are evaluated by DESCENDING LEVEL.
+    100260 (L12) must outrank 100261 (L8) and does. 100263 (L12) must outrank 100264 (L10) and does.
+    Both custom children of 92041 outrank nothing else, but they DO displace 92041 itself, which is the
+    point - counts must be reported as relabelled, not as new detection.
+
+    ⚠️ 100260 vs 100261 IS A DELIBERATE EXPERIMENT, not redundancy. 100260 requires the value to be set
+    to ZERO - the direction that disables a security control. 100261 fires on any write to the same
+    keys. The benign mirror ENABLES module logging (value 1) where the atomic DISABLES it (value 0), on
+    the same key, by the same writer. So the prediction is that 100261 fires in BOTH classes and 100260
+    fires in ONE - and if that holds, it is a genuine discriminator rather than a mirror artefact,
+    because disabling security logging is intrinsically suspicious in a way that enabling it is not.
+    This is the first rule in the study designed to test WHEN rule logic can separate the classes rather
+    than to demonstrate that it cannot.
+
+    ⚠️ Sysmon writes DWORD details as "DWORD (0x00000000)", not "0". The zero test is
+    DWORD\s*\(0x0+\) - `0x0+\)` cannot match 0x00000001 because a non-zero digit precedes the paren.
+
+    ⚠️ KNOWN LIMITATION OF 100260, found in the dry-run and left in deliberately. "Disable" is not
+    always zero. EnableModuleLogging=0 disables logging, but DisableAntiSpyware=1 also disables a
+    control - the polarity depends on whether the value name is phrased positively or negatively.
+    100260 tests for zero and therefore MISSES every Disable*=1 setting, including Defender tampering,
+    which is among the most important cases in the whole family.
+    Enumerating the polarity of every security value name is exactly the brittle, list-maintenance
+    approach this project criticises in the FIM allow-list, so it is not attempted. 100261 catches those
+    writes at L8 regardless of value, and the residual gap is recorded as a limitation rather than
+    papered over with a longer regex. This is a concrete instance of the general finding: value-content
+    rules need a semantic model of what each value MEANS, which is precisely the knowledge a rule engine
+    does not have and a triage model has to supply.
+    ===================================================================================================
+  -->
+
+  <rule id="100260" level="12">
+    <if_group>sysmon_event_13</if_group>
+    <field name="win.eventdata.targetObject" type="pcre2">(?i)\\\\(Policies\\\\Microsoft\\\\Windows\\\\(PowerShell|EventLog|System|WindowsUpdate)|Policies\\\\Microsoft\\\\Windows Defender|Microsoft\\\\Windows Defender|CurrentControlSet\\\\Services\\\\(WinDefend|EventLog|Sysmon))\\\\</field>
+    <field name="win.eventdata.details" type="pcre2">(?i)DWORD\s*\(0x0+\)</field>
+    <description>T1112 Security control or logging policy DISABLED via registry: $(win.eventdata.targetObject)</description>
+    <mitre>
+      <id>T1112</id>
+      <id>T1562.001</id>
+    </mitre>
+  </rule>
+
+  <rule id="100261" level="8">
+    <if_group>sysmon_event_13</if_group>
+    <field name="win.eventdata.targetObject" type="pcre2">(?i)\\\\(Policies\\\\Microsoft\\\\Windows\\\\(PowerShell|EventLog|System|WindowsUpdate)|Policies\\\\Microsoft\\\\Windows Defender|Microsoft\\\\Windows Defender|CurrentControlSet\\\\Services\\\\(WinDefend|EventLog|Sysmon))\\\\</field>
+    <description>T1112 Security control or logging policy modified: $(win.eventdata.targetObject)</description>
+    <mitre>
+      <id>T1112</id>
+    </mitre>
+  </rule>
+
+  <rule id="100262" level="8">
+    <if_group>sysmon_event_13</if_group>
+    <field name="win.eventdata.targetObject" type="pcre2">(?i)\\\\Internet Settings\\\\(ZoneMap|Zones)\\\\</field>
+    <description>T1112 Internet security zone configuration modified: $(win.eventdata.targetObject)</description>
+    <mitre>
+      <id>T1112</id>
+    </mitre>
+  </rule>
+
+  <!-- Restores the precision 92041's regex was meant to have. A base64 blob worth alerting on is at
+       least 16 characters of the base64 alphabet, optionally padded - not "any run of zero or more
+       four-character groups", which is what the vendor pattern reduces to. T1027 is retained HERE
+       because here it is actually true. -->
+  <rule id="100263" level="12">
+    <if_sid>92041</if_sid>
+    <field name="win.eventdata.commandLine" type="pcre2">(?i)\s\/d\s+"?[A-Za-z0-9+\/]{16,}={0,2}\b</field>
+    <description>T1112 Registry value written with a genuine base64 payload via reg.exe</description>
+    <mitre>
+      <id>T1027</id>
+      <id>T1112</id>
+    </mitre>
+  </rule>
+
+  <!-- Everything else 92041 matched, which on measurement is everything: a plain reg add. Correctly
+       T1112, and NOT T1027 - the vendor rule asserts obfuscation that is not present, and an alert that
+       is wrong about why it fired is worse than no alert, because an analyst acts on the reason. -->
+  <rule id="100264" level="10">
+    <if_sid>92041</if_sid>
+    <description>T1112 Registry value written via reg.exe (re-attributed from T1027 Obfuscated Files)</description>
+    <mitre>
+      <id>T1112</id>
+    </mitre>
+  </rule>
+
 </group>

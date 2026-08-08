@@ -47,7 +47,7 @@ sudo systemctl restart wazuh-manager
 | 100230–100239 | T1082 System Information Discovery | Discovery | 1 | **100230, 100231, 100232, 100233** | 🟡 Written, not yet deployed — see note 2 |
 | 100240–100249 | T1033 System Owner/User Discovery | Discovery | 1 | **100240, 100241** | 🟡 Written, not yet deployed — see note 3 |
 | 100250–100259 | T1016 Network Config Discovery | Discovery | 1 | **100250, 100251, 100252** | 🟡 Written, not yet deployed — see note 4 |
-| 100260–100269 | **T1112 Modify Registry** *(reallocated — see below)* | Defense Evasion | 13 | — | Not started |
+| 100260–100269 | **T1112 Modify Registry** *(reallocated — see below)* | Defense Evasion | **13 + 1** | **100260, 100261, 100262, 100263, 100264** | ✅ Deployed + measured over **three** phases 2026-08-08 — notes 10, 10a, 10b, 10c |
 | 100270–100279 | T1053.005 Scheduled Task | Persistence | 1 | **100270, 100271** | 🟡 Written, not yet deployed — see note 7 |
 | 100280–100289 | T1136.001 Create Local Account | Persistence | 1 / **Security 4720** | **100280, 100281, 100282, 100283** | ✅ Deployed + smoke-tested 2026-08-08 — see note 8 |
 | 100290–100299 | **T1547.001 Registry Run Keys** *(reallocated — see below)* | Persistence | **13 + 11** | **100290, 100291, 100292, 100294** · ~~100293 retired, ID reserved~~ | ✅ Deployed + measured 2026-08-08 — notes 9, 9a, 9b |
@@ -342,6 +342,168 @@ have parent `cmd.exe` and match built-in rule `92032`, which is what places them
 `sysmon_eid1_detections` — the group `100270` chains from. Without a `cmd.exe` parent the event never
 enters that group and the child rule has nothing to chain onto. **Smoke tests must reproduce the atomic's
 process lineage, not merely run the same binary.** Confirmed by retesting through `cmd.exe /c`.
+
+---
+
+### Note 10 — T1112: predictions recorded before detonating, and a likely SEVENTH failure mode
+
+Written 2026-08-08 **before** the baseline run, from reading the ruleset and the agent config. Same
+discipline as note 9, for the same reason: a failure-mode taxonomy assembled after seeing the data is
+open to the charge of being fitted to it.
+
+**T1112 has more nominal coverage than any technique so far, and probably the least usable.** Three
+sources claim it, none of them Sysmon EID 13:
+
+| Source | Rules | What it actually is |
+|---|---|---|
+| Wazuh **FIM** (`syscheck`) | `594`, `597`, `598`, `750`, `751`, `752` — all L5 | *"Registry Key/Value Integrity Checksum Changed / Deleted / Added"* |
+| Sysmon EID 13 | `92304`–`92306` | UAC-bypass rules for **one key**, `Classes\Folder\shell\open\command`; T1112 is a secondary tag beside T1548.002 |
+| PowerShell **Script Block Logging** (EID 4104) | `91813`, `91814` | **Cannot fire — logging is disabled on this endpoint.** Verified, not assumed: `EnableScriptBlockLogging` returns nothing |
+
+**The FIM coverage has two independent limits, and it is important to keep them apart.**
+
+**(a) SCOPE — an allow-list, and it is HKLM-only.** The agent watches exactly 20 registry paths. Every
+one begins `HKEY_LOCAL_MACHINE`. **There is not a single `HKEY_CURRENT_USER` entry.** A large share of
+the 90 T1112 atomics write to `HKCU\Software\Microsoft\Windows\CurrentVersion\Policies\...` — the
+"Disable Task Manager", "NoRun", "NoControlPanel" family — and are therefore outside the monitored set
+by construction. Coverage limited to paths someone enumerated in advance is a different thing from
+behavioural detection, and an adversary needs only to pick a key nobody listed.
+
+**(b) LATENCY — `<frequency>43200</frequency>`, a 12-hour scan, with no real-time registry option
+configured.** Registry FIM is scan-based. A detonation window here is ~20s with a 120s label buffer, so
+the scan interval is roughly **360× the entire observation window**. A FIM alert for a modification made
+now arrives, on average, six hours later.
+
+**Proposed seventh failure mode: LATENT COVERAGE.** The rule exists, it is correctly aimed at registry
+modification, it emits an alert — and it cannot arrive in time to matter. Distinct from all six:
+
+| Mode | Rule exists? | Aimed right? | Emits? | Arrives in time? |
+|---|---|---|---|---|
+| parent-only (T1087.001) | yes | parent only | yes | yes |
+| wrong tactic (T1082, T1016, T1053.005) | no | — | for something else | yes |
+| partial coverage (T1033) | one variant | yes | partly | yes |
+| adequate (T1059.001/003) | yes | yes | yes | yes |
+| sibling misattribution (T1136.001) | yes | **no** | yes | yes |
+| suppressed severity (T1547.001) | yes | yes | **no** | — |
+| **latent coverage (T1112, predicted)** | **yes** | **yes** | **yes** | **NO** |
+
+**FALSIFIABLE PREDICTIONS for the baseline run:**
+
+1. **Zero** FIM alerts (`594`/`597`/`598`/`750`/`751`/`752`) inside any detonation window, for **any**
+   atomic — including ones that write to allow-listed HKLM paths.
+2. HKCU-targeting atomics produce no registry-sourced alert of any kind: outside the FIM allow-list, and
+   no Sysmon EID 13 rule matches generic policy keys.
+3. **The discriminating prediction.** HKLM atomics on *allow-listed* paths also produce nothing
+   in-window. If true, allow-list membership makes **no observable difference at incident timescales**,
+   which separates latency from scope as the binding constraint. If allow-listed paths *do* alert
+   promptly, then scan-based FIM is not the limit and this whole note is wrong.
+4. What fires instead is process-level execution telemetry for `reg.exe` / `powershell.exe` — the same
+   wrong-tactic misattribution measured in T1082 and T1016, this time reading Defense Evasion as
+   Execution.
+
+**Retrospective support already in hand:** T1547.001's atomic 3 wrote to
+`HKLM\Software\Microsoft\Windows\CurrentVersion\RunOnce`, which **is** on the allow-list, and produced no
+FIM alert whatsoever across five runs. That is prediction 3 already holding once, unplanned.
+
+**⚠️ Do not "fix" the endpoint to make this measurable.** Adding HKCU paths or shortening the scan
+interval would improve the lab's detection and destroy the finding. The default configuration is the
+object of study.
+
+#### Note 10a — predictions scored, and the defect in `92041`
+
+Baseline 2026-08-08, 5+5 windows, atomics 1/2/33/60. **55 attack / 41 benign.** All four predictions held.
+
+| # | Prediction | Outcome |
+|---|---|---|
+| 1 | Zero FIM alerts in any window | ✅ none of `594`/`597`/`598`/`750`/`751`/`752` appeared |
+| 2 | HKCU atomics produce no registry-sourced alert | ✅ the only registry paths that alerted were the two HKLM Run writes |
+| 3 | **Allow-listed HKLM paths also silent in-window** | ✅ atomic 2 writes `HKLM\…\CurrentVersion\Run`, which **is** on the list, and produced no FIM alert. **Latency is the binding constraint, not scope** |
+| 4 | Execution telemetry fires instead | ✅ `92052`/`92004`/`92027` → T1059.x. Defense Evasion read as Execution |
+
+**`92041` is the sharpest vendor defect found anywhere in this study.** It is the only default rule that
+fires *and* claims T1112 — and it is a **process-creation** rule in `0800-sysmon_id_1.xml` that never
+reads the registry:
+
+```
+(?i)add.+\/d\s+(")?(?:[A-Za-z\d+\/]{4})*(?:[A-Za-z\d+\/]{3}=|[A-Za-z\d+\/]{2}==)?
+```
+
+Every group after `/d` is quantified `*` or `?`. **Zero repetitions satisfy the whole pattern**, so it
+matches any `reg add … /d <anything>` — verified down to `add x /d ` with nothing following. Consequences:
+
+- Fired **exactly once per `reg add` issued**: 6 per attack run, 3 per benign run → 30/15. It is a
+  `reg.exe` execution counter wearing a base64 detector's description.
+- Asserts **T1027 Obfuscated Files in all 45 cases**, none of which involve obfuscation.
+- **Structurally blind to PowerShell registry modification** — `Set-ItemProperty` spawns no `reg.exe`.
+
+A defect of **precision**, not coverage. Precision defects are what generate alert fatigue: they fire
+constantly, at level 10, carrying no information. Worth pairing with `92219` (Windows Update) and with
+`100200`, which had the same class of defect **twice** under my own authorship — that repetition is what
+makes the pattern structural rather than a vendor failing.
+
+#### Note 10b — three phases, and the finding that the sensor is the ceiling
+
+`baseline` (default rules + default sensor) → `custom` (custom rules + default sensor) → `custom-sensor`
+(custom rules + widened sensor). Three phases because the remediation has two independent parts, and
+conflating them would have hidden the result entirely.
+
+| Rule | Lvl | base A/B | custom A/B | sensor A/B | |
+|---|---|---|---|---|---|
+| `92041` | 10 | 30 / 15 | **0 / 0** | 0 / 0 | displaced |
+| `100264` | 10 | 0 / 0 | **30 / 15** | 30 / 15 | 1:1 replacement, false T1027 removed |
+| `100263` | 12 | 0 / 0 | **0 / 0** | **0 / 0** | correct — no atomic writes real base64 |
+| `100260` | 12 | 0 / 0 | **0 / 0** | **20 / 0** | invisible until the sensor emitted |
+| `100261` | 8 | 0 / 0 | **0 / 0** | **0 / 5** | " |
+| `100262` | 8 | 0 / 0 | **0 / 0** | **18 / 10** | " |
+| **totals** | | **55 / 41** | **55 / 41** | **93 / 55** | |
+
+**The rule fix changed attribution, not volume — 55/41 → 55/41, identical.** That is the cleanest
+possible statement of what repairing a broken rule buys you: the same alerts, correctly labelled.
+
+**`100260`–`100262` were correct, deployed, and fired 0/0** because Sysmon's config gates which registry
+keys emit EID 13 at all. Measured directly: 400 EID 13 events sampled, **81** Run-key writes, **0** for
+`ModuleLogging`, **0** for `ZoneMap`. **Nine added config lines** — two `TargetObject` entries, zero
+removals, diffed line by line — moved them to 20/0, 0/5, 18/10.
+
+> **No SIEM rule can close a gap the sensor never emits.** Every custom rule in this project up to here
+> worked because it keyed on EID 1, which Sysmon emits broadly. The moment a technique's evidence lives
+> somewhere the sensor filters, rule quality stops being the constraint. This reframes the project's own
+> premise, and it is measured rather than argued.
+
+**Two allow-lists stack, and neither covers the important key.** Sysmon's include-list gates what exists;
+Wazuh FIM's 20 HKLM paths on a 12-hour scan gate what is checked. The endpoint runs SwiftOnSecurity's
+config — the most widely deployed community Sysmon config — whose registry include-list watches Defender
+exclusions, UAC tampering, Security Center and `Policies\Explorer\Run`, but **not**
+`Policies\Microsoft\Windows\PowerShell\`. Atomic 33 disabled PowerShell script-block and module logging
+on this endpoint and **nothing in the pipeline saw it**.
+
+#### ⭐ Note 10c — the first custom rule that cleanly separates the classes, and why
+
+Unplanned, and the most useful single result for the ML chapter. Two custom rules, **same technique, same
+phase, same data source, same atomics**:
+
+| Rule | Keys on | attack / benign |
+|---|---|---|
+| `100260` | the **direction** of the change — DWORD set to zero, i.e. a control being *disabled* | **20 / 0** |
+| `100262` | the **location** of the change — browser zone configuration | **18 / 10** |
+
+The atomic disables PowerShell logging; the benign mirror enables it. Same key, same writer, same rule
+surface, opposite intent.
+
+> **A rule that encodes intent can separate the classes. A rule that encodes mechanism cannot.**
+
+Nine techniques produced no cleanly discriminating custom rule; every apparent one turned out to be a
+mirror artefact (`100241`, `100251`, `100271`, `100282`). This is not: disabling security logging is
+intrinsically adversarial in a way that enabling it is not, and the mirror exercises the same key in the
+same way. It marks the boundary of what rule logic can do unaided — and tells the triage model precisely
+what kind of feature to look for: not *which* key or *which* binary, but *which way* the change went.
+
+**⚠️ And its limitation is the same lesson inverted.** "Disable" is not always zero:
+`EnableModuleLogging=0` disables, but `DisableAntiSpyware=1` also disables. Polarity depends on how the
+value name is phrased, so `100260` misses every `Disable*=1` setting — **including Defender tampering**.
+Encoding intent requires knowing what each value *means*, and enumerating that is the same brittle
+list-maintenance this technique criticises in the FIM allow-list. Recorded as a limitation rather than
+patched with a longer regex, because the gap is the argument.
 
 ---
 

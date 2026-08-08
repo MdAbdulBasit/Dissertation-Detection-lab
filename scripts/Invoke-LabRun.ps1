@@ -64,7 +64,20 @@ param(
     # expires and before the next window opens - so the deletion telemetry is attributed to no window.
     # This forces a gap wider than the buffer, so 45-90s gaps cannot be used with it.
     [switch]$CleanupBetweenRuns,
-    [ValidateSet('baseline','custom')][string]$RulesetPhase = 'custom',
+    # 'custom-sensor' added 2026-08-08 for T1112, the first technique whose gap CANNOT be closed by a
+    # rule. Sysmon's own config filters which registry keys emit EID 13: 400 EID 13 events in a sample,
+    # 81 of them Run-key writes, and ZERO for HKCU\...\Policies\...\PowerShell or Internet Settings. So
+    # rules 100260-100262 are unfalsifiable under the default sensor - correct, deployed, and matching
+    # events that are never emitted.
+    #
+    # Three phases therefore decompose the remediation instead of conflating it:
+    #   baseline      default rules, default sensor
+    #   custom        custom rules, default sensor      -> isolates the rule fix (100263/100264)
+    #   custom-sensor custom rules, WIDENED sensor      -> isolates what the sensor change unlocks
+    #
+    # Without the third phase the claim "sensor configuration is the binding constraint, not rule
+    # quality" stays an assertion. With it, it is a measurement.
+    [ValidateSet('baseline','custom','custom-sensor')][string]$RulesetPhase = 'custom',
     [int]$Repeat = 1,
     # Raised from 60/120 on 2026-08-06. Measured Sysmon -> agent -> manager forwarding lag reached
     # p99 111s and max 169s, so the labelling buffer had to go to 120s - and the gap MUST exceed the
@@ -298,6 +311,41 @@ $BenignMirror = @{
         # A management agent registering a PowerShell maintenance script at logon is entirely ordinary, so
         # this belongs in the benign class on its merits, not merely to balance the numbers.
         Invoke-ViaPowerShell 'Set-ItemProperty -Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\Run" -Name LabBenignSync -Value "powershell.exe -NoProfile -File C:\ProgramData\LabBenign\sync.ps1"'
+    }
+    # T1112 Modify Registry. Mirrors all four atomic mechanisms, matched on HIVE and WRITER because
+    # those are the two variables the technique's finding turns on:
+    #
+    #   atomic 1   cmd        -> HKCU\...\Explorer\Advanced                    (outside the FIM allow-list)
+    #   atomic 33  cmd        -> HKCU\Software\Policies\...\PowerShell         (outside the allow-list)
+    #   atomic 60  PowerShell -> HKCU\...\Internet Settings\ZoneMap            (outside the allow-list)
+    #   atomic 2   cmd        -> HKLM\...\CurrentVersion\Run                   (ON the allow-list)
+    #
+    # Every one of these has an unremarkable administrative counterpart: setting Explorer display
+    # options, setting a PowerShell policy value, adjusting Internet zone defaults, and registering a
+    # health-check binary at logon. Registry modification is not intrinsically adversarial - which is
+    # precisely why a technique named "Modify Registry" is hard to detect on behaviour alone.
+    #
+    # ⚠️ The HKLM Run write deliberately mirrors atomic 2 rather than dodging it. It will fire the
+    # T1547.001 custom rules (100290/100291) in BOTH classes, which is correct: the behaviour genuinely
+    # is Registry Run Key persistence as well as registry modification. Cross-technique attribution is
+    # reported per LABELLING_SCHEME.md 3a, not designed out - and pairing it across classes is what stops
+    # it becoming a discriminator.
+    #
+    # ⚠️ Values, not just paths, are chosen to be plausible. Atomic 1 sets HideFileExt=1 (hiding
+    # extensions, the adversary-useful direction); the mirror sets it to 0. Same key, same writer, same
+    # rule surface, opposite intent - and no rule in either ruleset can tell them apart. That pairing is
+    # the sharpest single illustration in the study of why rule logic alone cannot separate the classes.
+    #
+    # NOT self-cleaning, same reasoning as T1547.001: a delete emits its own EID 13, and the attack
+    # phase does not delete inside its windows. Both phases are cleaned once, after the phase.
+    'T1112' = {
+        Invoke-ViaCmd 'reg add HKCU\Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced /t REG_DWORD /v HideFileExt /d 0 /f'
+        Start-Sleep 3
+        Invoke-ViaCmd 'reg add HKCU\Software\Policies\Microsoft\Windows\PowerShell\ModuleLogging /v EnableModuleLogging /t REG_DWORD /d 1 /f'
+        Start-Sleep 3
+        Invoke-ViaCmd 'reg add HKLM\Software\Microsoft\Windows\CurrentVersion\Run /t REG_EXPAND_SZ /v LabBenignHealth /d C:\ProgramData\LabBenign\health.exe /f'
+        Start-Sleep 3
+        Invoke-ViaPowerShell 'Set-ItemProperty -Path "HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\Internet Settings\ZoneMap\ProtocolDefaults" -Name http -Value 3; Set-ItemProperty -Path "HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\Internet Settings\ZoneMap\ProtocolDefaults" -Name https -Value 3'
     }
     'T1070.004' = { $t = "$env:TEMP\labtest.txt"; "x" | Out-File $t; Invoke-ViaCmd "del `"$t`"" }
     'T1560.001' = { $s = "$env:TEMP\labzip"; New-Item -ItemType Directory -Path $s -Force | Out-Null; "x" | Out-File "$s\a.txt"; Compress-Archive -Path "$s\a.txt" -DestinationPath "$env:TEMP\lab.zip" -Force; Remove-Item "$env:TEMP\lab.zip","$s" -Recurse -Force }
