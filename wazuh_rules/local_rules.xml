@@ -34,10 +34,26 @@
     exactly the dimension the thesis claims to improve, and it would have inflated the positive
     class in the ML dataset with routine drive mappings.
   -->
+  <!--
+    ⚠️ PRECISION FIX 2026-08-08, found while preparing T1136.001 Create Local Account.
+
+    As written, this rule matched `net user <name> /add` because that command line contains "user" - so
+    ACCOUNT CREATION would have been reported as ACCOUNT DISCOVERY. That is the same class of error this
+    project measures in the default ruleset: right family, wrong technique. `net user X /add` is
+    T1136.001, `net user X /delete` is T1531 Account Access Removal, and neither is discovery.
+
+    The negated condition below excludes the modifying switches, leaving 100200 to match enumeration
+    only. Verified safe for the existing T1087.001 result: its atomics run `net user`, `net localgroup`
+    and `quser` with no /add, /delete or /active, so the recorded measurements are unchanged.
+
+    Caught by asking "which existing rule will fire on the NEXT technique's commands?" before running it -
+    the same cross-rule check that was added to the register after T1016.
+  -->
   <rule id="100200" level="10">
     <if_group>sysmon_eid1_detections</if_group>
     <field name="win.eventdata.originalFileName" type="pcre2">(?i)net1?\.exe</field>
     <field name="win.eventdata.commandLine" type="pcre2">(?i)\s+(user|localgroup|group|accounts)\b</field>
+    <field name="win.eventdata.commandLine" type="pcre2" negate="yes">(?i)\s/(add|delete|active)\b</field>
     <description>T1087.001 Local Account Discovery via net.exe</description>
     <mitre>
       <id>T1087.001</id>

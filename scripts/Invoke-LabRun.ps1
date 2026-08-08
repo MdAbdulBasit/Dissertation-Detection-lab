@@ -213,6 +213,12 @@ $BenignMirror = @{
         Start-Sleep 3
         Invoke-ViaPowerShell 'Get-ScheduledTask | Select-Object -First 3 | Out-String'
     }
+    # T1136.001 creates a LOCAL USER ACCOUNT. An administrator provisioning a service account is entirely
+    # ordinary, so the mirror creates one and removes it. Self-cleaning, so no -CleanupBetweenRuns needed
+    # on the benign side.
+    # ⚠️ A password is supplied deliberately: `net user X /add` with no password can prompt, which would
+    # hang the run the way the T1053.005 "replace? (Y/N)" prompt did.
+    'T1136.001' = { Invoke-ViaCmd 'net user LabBenignSvc Lab#Benign2026 /add & net user LabBenignSvc /delete' }
     'T1070.004' = { $t = "$env:TEMP\labtest.txt"; "x" | Out-File $t; Invoke-ViaCmd "del `"$t`"" }
     'T1560.001' = { $s = "$env:TEMP\labzip"; New-Item -ItemType Directory -Path $s -Force | Out-Null; "x" | Out-File "$s\a.txt"; Compress-Archive -Path "$s\a.txt" -DestinationPath "$env:TEMP\lab.zip" -Force; Remove-Item "$env:TEMP\lab.zip","$s" -Recurse -Force }
 }
