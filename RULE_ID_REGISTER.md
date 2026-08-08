@@ -328,6 +328,128 @@ process lineage, not merely run the same binary.** Confirmed by retesting throug
 
 ---
 
+### Note 9 — T1547.001: a PREDICTION recorded before detonating, and a likely sixth failure mode
+
+Written 2026-08-08 **before** the baseline run, from reading `/var/ossec/ruleset/rules/0860-sysmon_id_13.xml`.
+Recorded in advance deliberately: every previous technique was characterised *after* seeing the data,
+which makes the failure-mode taxonomy vulnerable to the charge that it was fitted to the results. This
+one is falsifiable in advance.
+
+**First: registry telemetry proven to exist before anything depends on it.** Sysmon on the endpoint is
+emitting EID 1 (354), 11 (77), 22 (30), 3 (19), 5 (12), **13 (7)** and 12 (1) in a 500-event sample. An
+event type that is not logged is indistinguishable from a technique that is not detected, and that
+confusion has already cost this project a day. **Still unproven and needed later: EID 23/26 (file
+delete) for T1070.004 and EID 10 (process access) for T1003.001.** Neither appeared in the sample; EID
+10 is normally filtered to lsass-targeting only, so it may be present but idle. Prove both before
+starting those techniques, not during.
+
+**The default posture for T1547.001 is unlike anything measured so far.** Wazuh has a dedicated,
+*correctly mapped* rule for Run-key persistence — and it is silent:
+
+```
+92300  level 0   if_group sysmon_event_13   targetObject matches ...CurrentVersion\Run    -> T1547.001
+  92301  level 12  if_sid 92300   details matches \.(lnk|vbs|vba)                          -> T1547.001
+  92302  level 6   if_sid 92300   image matches reg\.exe                                   -> T1547.001
+  92303  level 12  if_sid 92300   details matches (VNC|tvnserver\.exe)                     -> T1547.001
+```
+
+Level 0 in Wazuh means *matched but no alert emitted*. So 92300 is a parent used only to gate three
+narrow children. A Run key whose value is a plain `.exe` path, or `powershell.exe -enc <payload>`,
+written by anything other than `reg.exe`, matches 92300 — and produces **nothing**.
+
+**Proposed sixth failure mode: SUPPRESSED SEVERITY.** The rule exists, the ATT&CK mapping is right, the
+path regex is right, and the general case is still invisible. Distinct from all five so far:
+
+| Mode | Rule exists? | Mapping right? | Alert emitted? |
+|---|---|---|---|
+| parent-only (T1087.001) | yes | parent technique only | yes |
+| wrong tactic (T1082, T1016, T1053.005) | no rule for the technique | n/a | yes, for something else |
+| partial coverage (T1033) | for one variant | yes | yes, partially |
+| adequate (T1059.001/003) | yes | yes | yes |
+| sibling misattribution (T1136.001) | yes | **no** | yes |
+| **suppressed severity (T1547.001, predicted)** | **yes** | **yes** | **no** |
+
+**FALSIFIABLE PREDICTIONS for the baseline run** — if these fail, the mode is wrong and the note gets
+rewritten rather than quietly dropped:
+
+1. Atomics that write a Run key via **`reg.exe`** produce `92302` at level 6.
+2. Atomics that write the same key via **PowerShell** (`Set-ItemProperty`/`New-ItemProperty`) produce
+   **zero** T1547.001 alerts.
+3. No alert at all carries rule id `92300`, because level 0 is never emitted.
+4. Any atomic pointing a Run key at a `.lnk`/`.vbs` produces `92301` at level 12 — the default is not
+   uniformly blind, and where it fires it fires *harder* than my custom rules will.
+
+**Prediction 2 is the interesting one.** It means the same behaviour — same registry key, same
+persistence, same outcome at next logon — is detected or invisible depending only on which binary
+performed the write. That is a within-technique contrast the earlier techniques could not produce.
+
+**Planned rules `100290`–`100291`,** subject to the measurement:
+
+- `100290` level 12 — `if_sid 92300` plus a `details` condition for interpreters and suspicious paths
+  (`powershell`, `cmd.exe`, `mshta`, `rundll32`, `wscript`, `-enc`, `AppData\Local\Temp`, `.bat`, `.ps1`).
+- `100291` level 8 — `if_sid 92300` with **no further conditions**: the catch-all that stops the general
+  case being silent.
+
+⚠️ **Ordering matters and is not the same problem as before.** Wazuh evaluates sibling children in load
+order, and `local_rules.xml` loads last, so `92301`–`92303` are tested before either custom rule. The
+vendor's high-severity rules therefore keep their behaviour and the custom catch-all only picks up what
+they miss — which is the correct outcome, but it must be **verified in the export**, not assumed.
+`100290` must also appear *before* `100291` in the file or the catch-all will swallow everything.
+
+⚠️ **Startup-folder variants of T1547.001 are EID 11, not 13**, and nothing in `0860-sysmon_id_13.xml`
+covers them. Check whether the selected atomics include them; if so that is a second, separate gap in
+the same technique and needs its own rule against `targetFilename`.
+
+#### Note 9a — the predictions, scored
+
+Baseline run 2026-08-08, 5+5 windows, atomics 1/3/7/12. **27 attack / 31 benign** after excluding
+Windows Update noise.
+
+| # | Prediction | Outcome |
+|---|---|---|
+| 1 | `reg.exe` write → `92302` at level 6 | ✅ **confirmed** — 4 attack alerts, level 6 |
+| 2 | PowerShell write → **zero** T1547.001 alerts | ✅ **confirmed** — only 9 alerts in the whole technique carry a registry `targetObject`, and `92302`'s 4+5 accounts for all of them |
+| 3 | `92300` never appears | ✅ **confirmed** — absent; level 0 is never emitted |
+| 4 | Run value pointing at `.lnk`/`.vbs` → `92301` at L12 | ⚠️ **UNTESTED** — no atomic in the set writes such a value. Atomic 7 drops a `.lnk` into the Startup *folder*, which is a file event. Recorded as untested, not as confirmed |
+
+**Prediction 2 verified positively, not by absence.** This technique predicts silence, so "no alerts"
+cannot distinguish a working run from a broken one. The registry values and the `.lnk` were confirmed
+present with `reg query` and `Test-Path` before cleanup, so the atomics definitely executed.
+
+**The result is stronger than the prediction.** Two things came out that were not anticipated:
+
+**(a) The benign class is noisier than the attack class — 31 vs 27.** First time in nine techniques. And
+`92302`, the *only* rule in the default ruleset that correctly maps to T1547.001, fires **4 attack / 5
+benign**. The sole correct detection available favours the wrong class. For a rule-based SOC this is the
+worst possible shape: the one true positive signal has a negative likelihood ratio.
+
+**(b) Two further gaps, independent of severity.**
+
+- **Path coverage.** `92300`'s regex requires `RUN` immediately after `CURRENTVERSION`, so
+  `HKCU\...\CurrentVersion\Policies\Explorer\Run` (atomic 12) never reaches it. A real Run-key location
+  with no rule at all. The alternation *is* unanchored, so `RUNONCE` and `RUNONCEEX` match by accident —
+  the regex is simultaneously too loose and too tight.
+- **Wrong data source.** The Startup-folder variant is EID 11. `0860-sysmon_id_13.xml` covers registry
+  only, so atomic 7's `.lnk` drop produced no T1547.001 attribution.
+
+**Misattribution sits on top of the silence.** `92041` (L10) → **T1027 + T1112**, `92201` (L9) →
+**T1105 + T1059**, both firing in *both* classes. `92041` was initially assumed to be an EID 13 rule
+from its description ("Value added to registry key has Base64-like value") — it carries no
+`targetObject` or `details`, which is how it was identified as reading Windows Security event **4657**
+instead. Worth remembering: **a rule's description tells you what it looks for, not which log it reads.**
+
+**⚠️ The exporter gained `target_object`, `details` and `event_type` for this technique.** Before that,
+a registry alert exported as a rule id and nothing else — `HKCU\...\Run` and
+`HKCU\...\Policies\Explorer\Run` were indistinguishable in the dataset, and that distinction is the
+entire finding. Any future technique on a new data source should be checked for the same problem before
+its baseline, not after.
+
+**Rules `100290`–`100291` stand as designed in note 9**, with one addition now justified by the data: a
+third rule for the Startup-folder file drop against EID 11 `targetFilename`, since that gap is real and
+separate. Numbering `100292`.
+
+---
+
 ### Note 8 — T1136.001 rules `100280`–`100282`, and a fifth failure mode
 
 Baseline over 5+5 windows (atomics 4, 5, 8, 9): **156 attack / 72 benign**. The default ruleset behaved

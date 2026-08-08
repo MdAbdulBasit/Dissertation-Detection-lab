@@ -140,6 +140,33 @@ CSC_TEMP_ARTEFACT = re.compile(
 SELF_MONITORING_IMAGES = {"secedit.exe"}
 SELF_MONITORING_PARENTS = {"wazuh-agent.exe"}
 
+# Third artefact class: the OPERATING SYSTEM's own background activity, found 2026-08-08 on T1547.001.
+#
+# Rule 92219 "Possible DLL search order hijack" (T1574.001/T1574.002) fired 26 times in T1547.001's
+# attack class and ZERO times in benign. On inspection every one is:
+#     image  = C:\Windows\system32\svchost.exe
+#     target = C:\Windows\SoftwareDistribution\Download\<guid>\...
+# which is Windows Update unpacking patches. Nothing to do with the atomics - it simply happened to run
+# during the attack phase.
+#
+# ⚠️ This is the most dangerous artefact class found so far, and worse than the harness artefacts,
+# because it is CLASS-CORRELATED BY COINCIDENCE. A harness artefact at least has a causal story; this is
+# pure timing. 26 of 53 T1547.001 attack alerts and 16 of 165 T1033 attack alerts, both attack-only,
+# both meaningless. Left in, a classifier would learn "Windows Update was running" as an attack feature
+# and score well for a reason that has nothing to do with detection.
+#
+# ⚠️ Scoped to the SoftwareDistribution path, NOT to rule 92219. Genuine DLL search-order hijacking is a
+# real technique (T1574.001) and a plausible future addition to the technique set; blanket-excluding the
+# rule would silently destroy that measurement.
+#
+# ⚠️ RETROSPECTIVE EFFECT: adding this changes T1033's already-recorded baseline attack count from 165
+# to ~149. The coverage table is updated accordingly rather than left at the number that was published
+# first - a filter that is correct is correct for every technique, not only the one that revealed it.
+OS_BACKGROUND_ARTEFACTS = (
+    re.compile(r"\\Windows\\SoftwareDistribution\\Download\\", re.I),   # Windows Update payloads
+    re.compile(r"\\Windows\\WinSxS\\Temp\\", re.I),                      # servicing stack scratch space
+)
+
 
 # =====================================================================================================
 # ⚠️ alerts.json ROTATES DAILY. Wazuh moves the previous day's alerts into
@@ -270,6 +297,15 @@ def classify_exclusion(alert):
     parent = basename_lower(eventdata.get("parentImage"))
     if image in SELF_MONITORING_IMAGES or parent in SELF_MONITORING_PARENTS:
         return "self-monitoring:wazuh-agent/SCA"
+
+    # Windows Update and servicing activity. Only when svchost.exe is the actor - a payload dropped into
+    # SoftwareDistribution by anything else is genuinely worth seeing, and scoping the exclusion to the
+    # OS's own updater keeps that path open. Same doubled-backslash unescaping as CSC_TEMP_ARTEFACT: the
+    # first version of that filter matched nothing for exactly this reason.
+    if image == "svchost.exe":
+        for field in (target, eventdata.get("imageLoaded") or "", eventdata.get("targetObject") or ""):
+            if field and any(p.search(field.replace("\\\\", "\\")) for p in OS_BACKGROUND_ARTEFACTS):
+                return "os-background:windows-update"
 
     return None
 
@@ -541,6 +577,13 @@ def main():
                 "command_line": eventdata.get("commandLine", ""),
                 "command_line_normalised": normalise_cmdline(eventdata.get("commandLine", "")),
                 "target_filename": eventdata.get("targetFilename", ""),
+                # Registry fields, added 2026-08-08 for T1547.001 - the first technique whose evidence
+                # lives in Sysmon EID 13 rather than EID 1. Without these, a registry alert exports as a
+                # rule id and nothing else: you cannot tell HKCU\...\Run from HKCU\...\Policies\Explorer\Run,
+                # which is the entire distinction the T1547.001 coverage gap turns on. Empty for EID 1.
+                "target_object": eventdata.get("targetObject", ""),
+                "details": eventdata.get("details", ""),
+                "event_type": eventdata.get("eventType", ""),
             })
 
             key = (match["technique_id"] if match else "-",

@@ -407,6 +407,52 @@ selection that avoids this, because a test that executes nothing would not exerc
    simply be dropped.
 4. The `rule_mitre` column already carries what is needed to separate them at analysis time.
 
+### 3c. ⚠️ OS background activity — 590 alerts, and the most dangerous artefact class yet
+
+Found 2026-08-08 while analysing T1547.001. Rule **`92219` "Possible DLL search order hijack"**
+(T1574.001/T1574.002) fired **26 times in the attack class and zero times in benign**. Every one:
+
+```
+image  = C:\Windows\system32\svchost.exe
+target = C:\Windows\SoftwareDistribution\Download\<guid>\...
+```
+
+Windows Update unpacking patches. Nothing to do with the atomics — it simply ran during the attack
+phase. The same rule had contributed **16 attack-only alerts to T1033**, already written up at the time.
+
+**Why this class is worse than the harness artefacts.** `92213`/`csc.exe` and `__PSScriptPolicyTest`
+were *caused* by the test harness: annoying, but causal, reproducible and findable by asking "what does
+my tooling do that an adversary wouldn't?". This one has **no causal link at all**. It is
+class-correlated by pure coincidence of timing. Nothing about the experimental design produced it, and
+nothing about re-running would reliably reproduce it. Left in the dataset, a classifier would learn
+*"Windows Update was active"* as an attack feature and score well for a reason that has nothing to do
+with detection — and because the correlation is accidental, it would not survive contact with any other
+environment.
+
+**Scoped to the path, not the rule.** `OS_BACKGROUND_ARTEFACTS` matches `\Windows\SoftwareDistribution\
+Download\` and `\Windows\WinSxS\Temp\`, and only when `image` is `svchost.exe`. Blanket-excluding rule
+`92219` would have been easier and wrong: genuine DLL search-order hijacking is T1574.001, a plausible
+future addition to the technique set, and the measurement must stay possible.
+
+**Retrospective by design.** A filter that is correct is correct for every technique, not only the one
+that revealed it. Re-exporting moved **T1033 baseline attack from 165 → 149** and T1547.001 from 53 → 27,
+and the coverage table carries both corrections with the original figures named. Total dataset-wide
+removal: **590 alerts**.
+
+**The general lesson for the methodology chapter.** Three artefact classes have now been removed, in
+increasing order of difficulty:
+
+| Class | Cause | How it was found |
+|---|---|---|
+| harness-induced | the test tooling itself | large, obviously attack-only, traceable to a filename pattern |
+| agent self-monitoring | the SIEM agent's own SCA scans | identical command lines, separated by process lineage |
+| **OS background** | **nothing — coincidence** | **only by inspecting the image and path of an attack-only rule and asking whether the lab caused it** |
+
+There is no procedure that finds the third class automatically. The only defence is to treat **every
+class-exclusive rule as guilty until inspected**, which is why the exporter prints them per phase.
+
+---
+
 ### 4. `net.exe` → `net1.exe` duplication
 
 Every `net` command produces two process-creation events and therefore two alerts. Deduplicate before

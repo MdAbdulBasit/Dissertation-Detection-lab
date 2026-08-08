@@ -153,7 +153,35 @@ function Invoke-ViaPowerShell {
     param([Parameter(Mandatory)][string]$CommandLine)
     # Mirrors ART's powershell executor, which spawns a CHILD powershell.exe. Running cmdlets inline
     # instead leaves rule 92027 ("Powershell process spawned powershell instance") attack-only.
-    Start-Process -FilePath 'powershell.exe' -ArgumentList '-NoProfile', '-Command', $CommandLine -NoNewWindow -Wait
+    #
+    # ⚠️ FIXED 2026-08-08, mid-run, during T1547.001's benign phase.
+    #
+    # The previous form passed the command as a bare third array element:
+    #     -ArgumentList '-NoProfile', '-Command', $CommandLine
+    # Start-Process joins ArgumentList with spaces and does NOT re-quote elements, and Windows
+    # command-line parsing then CONSUMES double quotes as grouping delimiters rather than passing them
+    # through. So this command:
+    #     $s = $w.CreateShortcut("$env:APPDATA\Microsoft\Windows\Start Menu\Programs\Startup\x.lnk")
+    # reached the child PowerShell with its quotes stripped, split at the space in "Start Menu", and
+    # failed with "Missing ')' in method call".
+    #
+    # Every earlier mirror survived this by luck: none of them contained a SPACE INSIDE A QUOTED STRING.
+    # Quotes were still being stripped in T1082, T1033, T1016 and T1136.001 - it just happened not to
+    # matter, because `-Path HKCU:\Software\...` is valid PowerShell with or without quotes. A latent
+    # bug that only manifests when an argument contains a space is exactly the kind that surfaces late.
+    #
+    # Fix: escape inner quotes as \" and wrap the whole command in one quoted argument, so Windows
+    # parsing hands the child a single intact string.
+    #
+    # ⚠️ Rejected alternative: -EncodedCommand. It is immune to all quoting problems, but it would make
+    # EVERY benign mirror emit a base64 command line, which trips rule 92057 ("powershell executed a
+    # base64 encoded command"). Encoding would become a benign-class marker - a class-correlated
+    # confound, and a worse problem than the one being fixed.
+    #
+    # ⚠️ Known limitation: a $CommandLine ending in a backslash would escape the closing quote. None do,
+    # and none should - if one ever needs to, append a space.
+    $escaped = $CommandLine -replace '"', '\"'
+    Start-Process -FilePath 'powershell.exe' -ArgumentList '-NoProfile', '-Command', "`"$escaped`"" -NoNewWindow -Wait
 }
 
 $BenignMirror = @{
@@ -219,6 +247,40 @@ $BenignMirror = @{
     # ⚠️ A password is supplied deliberately: `net user X /add` with no password can prompt, which would
     # hang the run the way the T1053.005 "replace? (Y/N)" prompt did.
     'T1136.001' = { Invoke-ViaCmd 'net user LabBenignSvc Lab#Benign2026 /add & net user LabBenignSvc /delete' }
+    # T1547.001 Registry Run Keys / Startup Folder. Mirrors all FOUR mechanisms in the selected atomic
+    # set, because the recurring lesson from 100241, 100251, 100271 and 100282 is that any mechanism the
+    # mirror omits becomes a free discriminator and has to be thrown out of the separability analysis:
+    #
+    #   atomics 1, 2  reg.exe  -> ...\CurrentVersion\Run and \RunOnce
+    #   atomic  3     PowerShell Set-ItemProperty -> ...\CurrentVersion\RunOnce
+    #   atomic  7     .lnk dropped into the Startup folder            (Sysmon EID 11, not 13)
+    #   atomic  12    PowerShell -> ...\CurrentVersion\Policies\Explorer\Run
+    #
+    # Registering an application to start at logon is routine administration - installers, updaters and
+    # sync agents all do it - so every one of these has a legitimate counterpart.
+    #
+    # ⚠️ NOT self-cleaning, unlike the T1053.005 and T1136.001 mirrors, and that is deliberate. Deleting a
+    # Run value emits its own EID 13 (eventType DeleteValue) which rule 92300 matches just as readily as a
+    # write. The ATTACK phase does not delete inside its windows - cleanup runs after the phase - so a
+    # self-cleaning mirror would give the benign class extra registry events the attack class never has.
+    # Both phases are therefore cleaned the same way, once, after the phase completes.
+    #
+    # ⚠️ No quotes and no spaces in the reg.exe arguments. Invoke-ViaCmd builds a single "/c <string>"
+    # argument for Start-Process, and embedded quotes are the fragile part of that; C:\ProgramData\... is
+    # used instead of C:\Program Files\... purely to avoid needing them.
+    'T1547.001' = {
+        Invoke-ViaCmd 'reg add HKCU\Software\Microsoft\Windows\CurrentVersion\Run /v LabBenignUpdater /t REG_SZ /d C:\ProgramData\LabBenign\updater.exe /f'
+        Start-Sleep 3
+        Invoke-ViaPowerShell 'Set-ItemProperty -Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\RunOnce" -Name LabBenignFirstRun -Value "C:\ProgramData\LabBenign\firstrun.exe"'
+        Start-Sleep 3
+        Invoke-ViaPowerShell '$w = New-Object -ComObject WScript.Shell; $s = $w.CreateShortcut("$env:APPDATA\Microsoft\Windows\Start Menu\Programs\Startup\LabBenignAgent.lnk"); $s.TargetPath = "C:\Windows\System32\notepad.exe"; $s.Save()'
+        Start-Sleep 3
+        # Both key levels created explicitly. The registry provider's New-Item does not reliably create
+        # missing intermediate keys, and assuming Policies\Explorer already exists would make the benign
+        # phase silently depend on the attack phase having run first - an ordering dependency between
+        # classes is exactly the kind of hidden coupling that invalidates a comparison.
+        Invoke-ViaPowerShell 'New-Item -Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\Policies\Explorer" -Force | Out-Null; New-Item -Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\Policies\Explorer\Run" -Force | Out-Null; Set-ItemProperty -Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\Policies\Explorer\Run" -Name LabBenignPolicy -Value "C:\Windows\System32\notepad.exe"'
+    }
     'T1070.004' = { $t = "$env:TEMP\labtest.txt"; "x" | Out-File $t; Invoke-ViaCmd "del `"$t`"" }
     'T1560.001' = { $s = "$env:TEMP\labzip"; New-Item -ItemType Directory -Path $s -Force | Out-Null; "x" | Out-File "$s\a.txt"; Compress-Archive -Path "$s\a.txt" -DestinationPath "$env:TEMP\lab.zip" -Force; Remove-Item "$env:TEMP\lab.zip","$s" -Recurse -Force }
 }
