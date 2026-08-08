@@ -1,0 +1,11 @@
+﻿session_id,type,technique_id,technique_name,atomic_test_numbers,window_start,window_end,ruleset_phase,operator_context,defender_realtime_off,notes
+20260807-234552-attack-r1,attack,T1053.005,,"1;2;4;6;9",2026-08-07 23:45:52,2026-08-07 23:49:03,baseline,atomic-red-team,True,
+20260807-235247-attack-r2,attack,T1053.005,,"1;2;4;6;9",2026-08-07 23:52:47,2026-08-07 23:52:53,baseline,atomic-red-team,True,
+20260807-235638-attack-r3,attack,T1053.005,,"1;2;4;6;9",2026-08-07 23:56:38,2026-08-07 23:56:47,baseline,atomic-red-team,True,
+20260808-000046-attack-r4,attack,T1053.005,,"1;2;4;6;9",2026-08-08 00:00:46,2026-08-08 00:00:51,baseline,atomic-red-team,True,
+20260808-000559-attack-r5,attack,T1053.005,,"1;2;4;6;9",2026-08-08 00:05:59,2026-08-08 00:06:05,baseline,atomic-red-team,True,
+20260808-001002-benign-r1,benign,T1053.005,,"",2026-08-08 00:10:02,2026-08-08 00:10:22,baseline,interactive-admin,True,
+20260808-001340-benign-r2,benign,T1053.005,,"",2026-08-08 00:13:40,2026-08-08 00:13:58,baseline,interactive-admin,True,
+20260808-001827-benign-r3,benign,T1053.005,,"",2026-08-08 00:18:27,2026-08-08 00:18:46,baseline,interactive-admin,True,
+20260808-002220-benign-r4,benign,T1053.005,,"",2026-08-08 00:22:20,2026-08-08 00:22:30,baseline,interactive-admin,True,
+20260808-002701-benign-r5,benign,T1053.005,,"",2026-08-08 00:27:01,2026-08-08 00:27:18,baseline,interactive-admin,True,

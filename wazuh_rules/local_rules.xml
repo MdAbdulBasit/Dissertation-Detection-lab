@@ -249,4 +249,54 @@
     </mitre>
   </rule>
 
+  <!--
+    ===================================================================================================
+    T1053.005 Scheduled Task
+    Custom rule IDs 100270-100271 | level 10
+
+    MEASURED BASELINE (2026-08-08, 4 usable windows, atomics 1/2/4/6/9, 48 attack alerts):
+    NOTHING in the default ruleset maps to T1053.005. What fires is:
+        92004  -> T1059.003          92027  -> T1059.001
+        92032  -> T1087 + T1059.003  92052  -> T1059.003
+    Every one is EXECUTION. A Persistence technique is read as Execution - a TACTIC-level miss, and the
+    starkest of the seven techniques measured so far. Creating a scheduled task that survives reboot is
+    materially different from running a command, and an analyst triaging these alerts would see only
+    "powershell spawned powershell" with no indication that anything was left behind.
+
+    LEVEL 10, not 8. Persistence outranks Discovery: a scheduled task grants an attacker return access
+    after reboot, whereas host enumeration is reconnaissance. Severity here reflects consequence.
+
+    TWO RULES, split by mechanism:
+      100270  schtasks.exe /create or /change  - the native path
+      100271  PowerShell and WMI task cmdlets  - Register/Set/New-ScheduledTask, MSFT_ScheduledTask
+
+    PRECISION NOTES:
+      * 100270 requires /create or /change. `schtasks /query` is ENUMERATION, not persistence, and the
+        benign mirror uses it - matching it would map task listing to Persistence.
+      * `schtasks /delete` is deliberately NOT matched. Deleting a task is T1070.009 Indicator Removal,
+        a different technique, and it is also what this lab's own cleanup does between runs.
+      * 100271 deliberately excludes `Get-ScheduledTask` for the same reason as /query.
+    ===================================================================================================
+  -->
+
+  <rule id="100270" level="10">
+    <if_group>sysmon_eid1_detections</if_group>
+    <field name="win.eventdata.originalFileName" type="pcre2">(?i)^schtasks\.exe$</field>
+    <field name="win.eventdata.commandLine" type="pcre2">(?i)\s/(create|change)\b</field>
+    <description>T1053.005 Scheduled Task created or modified via schtasks</description>
+    <mitre>
+      <id>T1053.005</id>
+    </mitre>
+  </rule>
+
+  <rule id="100271" level="10">
+    <if_group>sysmon_eid1_detections</if_group>
+    <field name="win.eventdata.originalFileName" type="pcre2">(?i)^powershell(\.exe)?$</field>
+    <field name="win.eventdata.commandLine" type="pcre2">(?i)(Register-ScheduledTask|Set-ScheduledTask|New-ScheduledTask|MSFT_ScheduledTask)</field>
+    <description>T1053.005 Scheduled Task created or modified via PowerShell or WMI</description>
+    <mitre>
+      <id>T1053.005</id>
+    </mitre>
+  </rule>
+
 </group>

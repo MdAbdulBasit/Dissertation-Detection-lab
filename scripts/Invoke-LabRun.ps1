@@ -53,6 +53,17 @@ param(
     # 'baseline' = this technique's own custom rules are NOT yet deployed, so the run measures DEFAULT
     # detection (the 'Default detected?' column). 'custom' = they are deployed ('Detected after?').
     # Recorded per row so the export can split counts by phase without hand-patching the CSV.
+    # REQUIRED for Persistence techniques. Atomics that create named, persistent artefacts (scheduled
+    # tasks, registry run keys, local accounts) collide with themselves on repeat: run 1 creates the
+    # object, runs 2-5 then measure FAILED creation, which is a different behaviour with different
+    # telemetry. Observed on T1053.005 (2026-08-07): run 1 clean, run 2 returned 0xC0000142, blocked on
+    # an interactive "task already exists, replace? (Y/N)" prompt for 120s, and Register-ScheduledTask
+    # failed with "Cannot create a file when that file already exists".
+    #
+    # Cleanup is scheduled to land in genuine DEAD TIME - after the previous window's +120s label buffer
+    # expires and before the next window opens - so the deletion telemetry is attributed to no window.
+    # This forces a gap wider than the buffer, so 45-90s gaps cannot be used with it.
+    [switch]$CleanupBetweenRuns,
     [ValidateSet('baseline','custom')][string]$RulesetPhase = 'custom',
     [int]$Repeat = 1,
     # Raised from 60/120 on 2026-08-06. Measured Sysmon -> agent -> manager forwarding lag reached
@@ -190,7 +201,18 @@ $BenignMirror = @{
         Start-Process -FilePath 'powershell.exe' -ArgumentList '-NoProfile','-EncodedCommand',$b64 -NoNewWindow -Wait
     }
     'T1059.003' = { Invoke-ViaCmd 'dir C:\Windows'; Start-Sleep 3; Invoke-ViaCmd 'tasklist' }
-    'T1053.005' = { Invoke-ViaCmd 'schtasks /query /fo LIST' }
+    # Widened 2026-08-07 BEFORE the first run, learning from T1033 and T1016 where a mirror narrower than
+    # the attack set left custom rules firing in one class only. The atomics CREATE scheduled tasks; a
+    # query-only mirror would have made creation a free discriminator. Creating a scheduled task is
+    # completely ordinary administration, so creation belongs in the mirror.
+    # Self-cleaning: the task is deleted in the same invocation, so the benign side leaves no drift.
+    'T1053.005' = {
+        Invoke-ViaCmd 'schtasks /query /fo LIST'
+        Start-Sleep 3
+        Invoke-ViaCmd 'schtasks /create /tn LabBenignInventory /tr cmd.exe /sc daily /st 09:00 /f & schtasks /delete /tn LabBenignInventory /f'
+        Start-Sleep 3
+        Invoke-ViaPowerShell 'Get-ScheduledTask | Select-Object -First 3 | Out-String'
+    }
     'T1070.004' = { $t = "$env:TEMP\labtest.txt"; "x" | Out-File $t; Invoke-ViaCmd "del `"$t`"" }
     'T1560.001' = { $s = "$env:TEMP\labzip"; New-Item -ItemType Directory -Path $s -Force | Out-Null; "x" | Out-File "$s\a.txt"; Compress-Archive -Path "$s\a.txt" -DestinationPath "$env:TEMP\lab.zip" -Force; Remove-Item "$env:TEMP\lab.zip","$s" -Recurse -Force }
 }
@@ -254,6 +276,24 @@ if ($Repeat -gt 1 -and $MinGapSeconds -lt 150) {
     Write-Warning "contaminate each other. Measured forwarding lag on 2026-08-06: p99 111s, max 169s."
 }
 
+# Cleanup must fall in dead time, which is impossible if the gap is narrower than the label buffer.
+$CLEANUP_DELAY = 130      # > the 120 s POST_BUFFER in export_labelled_alerts.py
+if ($CleanupBetweenRuns -and $Repeat -gt 1 -and $MinGapSeconds -lt ($CLEANUP_DELAY + 20)) {
+    Write-Error "-CleanupBetweenRuns needs -MinGapSeconds at least $($CLEANUP_DELAY + 20) so the cleanup"
+    Write-Error "lands AFTER the previous window's 120 s label buffer expires. Otherwise the deletion"
+    Write-Error "telemetry is labelled as part of the attack class. Re-run with -MinGapSeconds 180"
+    Write-Error "-MaxGapSeconds 300."
+    return
+}
+
+# Clear any artefacts left by an earlier phase BEFORE the first window opens, so run 1 measures creation
+# rather than collision.
+if ($CleanupBetweenRuns -and $Type -eq 'attack') {
+    Write-Host "Pre-run cleanup (before any window opens)..." -ForegroundColor DarkGray
+    Invoke-AtomicTest $TechniqueId -TestNumbers $TestNumberList -Cleanup
+    Start-Sleep 5
+}
+
 # --- CSV header ------------------------------------------------------------------
 $dir = Split-Path $OutFile -Parent
 if (-not (Test-Path $dir)) { New-Item -ItemType Directory -Path $dir -Force | Out-Null }
@@ -295,9 +335,32 @@ for ($i = 1; $i -le $Repeat; $i++) {
 
     if ($i -lt $Repeat) {
         $gap = Get-Random -Minimum $MinGapSeconds -Maximum ($MaxGapSeconds + 1)
-        Write-Host "Idle $gap s before run $($i + 1) - randomised so windows stay separable and the model cannot learn a fixed cadence..." -ForegroundColor DarkGray
-        Start-Sleep -Seconds $gap
+
+        if ($CleanupBetweenRuns) {
+            # Wait out the previous window's label buffer FIRST, so the cleanup's deletion telemetry is
+            # attributed to no window at all, then restore a clean state for the next run.
+            Write-Host "Idle $CLEANUP_DELAY s so run $i's label buffer expires before cleanup..." -ForegroundColor DarkGray
+            Start-Sleep -Seconds $CLEANUP_DELAY
+            Write-Host "Cleanup in dead time (attributed to no window)..." -ForegroundColor DarkGray
+            Invoke-AtomicTest $TechniqueId -TestNumbers $TestNumberList -Cleanup
+            $remaining = [Math]::Max(20, $gap - $CLEANUP_DELAY)
+            Write-Host "Idle $remaining s before run $($i + 1)..." -ForegroundColor DarkGray
+            Start-Sleep -Seconds $remaining
+        }
+        else {
+            Write-Host "Idle $gap s before run $($i + 1) - randomised so windows stay separable and the model cannot learn a fixed cadence..." -ForegroundColor DarkGray
+            Start-Sleep -Seconds $gap
+        }
     }
+}
+
+# Leave the endpoint clean: the last run's artefacts are still present at this point.
+if ($CleanupBetweenRuns -and $Type -eq 'attack') {
+    Write-Host "`nFinal cleanup after run $Repeat..." -ForegroundColor DarkGray
+    Start-Sleep -Seconds $CLEANUP_DELAY
+    Invoke-AtomicTest $TechniqueId -TestNumbers $TestNumberList -Cleanup
+    Write-Host "Verify nothing was left behind, e.g.:" -ForegroundColor DarkGray
+    Write-Host '  schtasks /query /fo LIST | findstr /i "TaskName" | findstr /v /i "Microsoft Google OneDrive"' -ForegroundColor DarkGray
 }
 
 Write-Host "`n$Repeat window(s) appended to: $OutFile" -ForegroundColor Green

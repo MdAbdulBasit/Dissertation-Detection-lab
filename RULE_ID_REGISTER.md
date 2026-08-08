@@ -31,7 +31,7 @@ sudo systemctl restart wazuh-manager
 | 100240–100249 | T1033 System Owner/User Discovery | Discovery | 1 | **100240, 100241** | 🟡 Written, not yet deployed — see note 3 |
 | 100250–100259 | T1016 Network Config Discovery | Discovery | 1 | **100250, 100251, 100252** | 🟡 Written, not yet deployed — see note 4 |
 | 100260–100269 | T1547.001 Registry Run Keys | Persistence | 13 | — | Not started |
-| 100270–100279 | T1053.005 Scheduled Task | Persistence | 1 | — | Not started |
+| 100270–100279 | T1053.005 Scheduled Task | Persistence | 1 | **100270, 100271** | 🟡 Written, not yet deployed — see note 7 |
 | 100280–100289 | T1136.001 Create Local Account | Persistence | 1 | — | Not started |
 | 100290–100299 | T1112 Modify Registry | Defense Evasion | 13 | — | Not started |
 | 100300–100309 | T1218.011 Rundll32 | Defense Evasion | 1 | — | Not started |
@@ -59,6 +59,8 @@ sudo systemctl restart wazuh-manager
 | 100250 | T1016 | 8 | `sysmon_eid1_detections` | `originalFileName` `^(ipconfig\|arp\|route\|nbtstat\|netstat\|nslookup)\.exe$` | No | All single-purpose network utilities |
 | 100251 | T1016 | 8 | `sysmon_eid1_detections` | `originalFileName` `netsh\.exe` + `commandLine` `\bshow\b` | No | ⚠️ `show` is mandatory — `netsh advfirewall set` is T1562.004, not Discovery |
 | 100252 | T1016 | 8 | `sysmon_eid1_detections` | `originalFileName` `net1?\.exe` + `commandLine` `\s+config\b` | No | Disjoint from 100200 by construction — `config` vs account subcommands |
+| 100270 | T1053.005 | **10** | `sysmon_eid1_detections` | `originalFileName` `schtasks\.exe` + `commandLine` `\s/(create\|change)\b` | No | ⚠️ `/query` excluded (enumeration, used by mirror); `/delete` excluded (T1070.009, and it's our own cleanup) |
+| 100271 | T1053.005 | **10** | `sysmon_eid1_detections` | `originalFileName` `powershell` + `commandLine` `Register-\|Set-\|New-ScheduledTask\|MSFT_ScheduledTask` | No | `Get-ScheduledTask` excluded — enumeration, not persistence |
 
 ---
 
@@ -287,3 +289,39 @@ identical**. T1059.003 is a *container* technique: a shell must execute somethin
 The T1016 precedent did not transfer, because there the offending atomics were optional malware
 emulations that could simply be dropped. See `LABELLING_SCHEME.md` §3b — Execution techniques are
 structurally different from Discovery techniques for per-technique attribution.
+
+---
+
+### Note 7 — T1053.005 rules `100270`–`100271`, deployed and verified 2026-08-08
+
+First Persistence technique, and the **starkest default failure of the seven measured**: nothing maps to
+T1053.005, and every rule that fired maps to **Execution**. A technique that plants a task surviving reboot
+is reported as "powershell spawned powershell".
+
+| ID | Mechanism | Level |
+|----|-----------|-------|
+| 100270 | `schtasks /create` or `/change` | **10** |
+| 100271 | `Register-`/`Set-`/`New-ScheduledTask`, `MSFT_ScheduledTask` | **10** |
+
+**Level 10, not the 8 used for Discovery.** A scheduled task grants return access after reboot; host
+enumeration is reconnaissance. Severity tracks consequence rather than copying the previous rule's number.
+
+**Three exclusions in `100270`, each load-bearing:**
+
+1. **`/query` excluded** — enumeration, not persistence, and the benign mirror uses it. Matching it would
+   label task *listing* as Persistence.
+2. **`/delete` excluded** — that is **T1070.009 Indicator Removal**, a different technique.
+3. And practically: `schtasks /delete` appears **57 times** in the dataset because it is *this lab's own
+   cleanup*. A broad `schtasks` rule would have recorded 57 of our own maintenance operations as
+   persistence attacks.
+
+**`(?i)` is mandatory.** Atomic 2 issues `SCHTASKS /Create` in uppercase. A rule written without
+case-insensitivity silently misses a third of the atomics — and silence is indistinguishable from
+non-detection.
+
+**⚠️ Smoke-test lesson worth generalising.** `100270` first appeared not to fire. The cause was the test,
+not the rule: it ran `schtasks` directly from `powershell.exe`. All 57 `schtasks.exe` events in the dataset
+have parent `cmd.exe` and match built-in rule `92032`, which is what places them in
+`sysmon_eid1_detections` — the group `100270` chains from. Without a `cmd.exe` parent the event never
+enters that group and the child rule has nothing to chain onto. **Smoke tests must reproduce the atomic's
+process lineage, not merely run the same binary.** Confirmed by retesting through `cmd.exe /c`.
