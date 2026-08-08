@@ -1,0 +1,36 @@
+# Line-ending policy. Added 2026-08-08 after `git status` reported ~20 archived CSVs as modified when
+# none of their content had changed - PowerShell writes CRLF, the files had been committed with LF, and
+# every commit was carrying a wall of spurious diffs. For a dissertation repo the commit history is part
+# of the evidence of method, so diffs need to mean something.
+#
+# Store everything LF in the repository; check out native on Windows.
+
+* text=auto
+
+# PowerShell is executed on the Windows endpoint - keep CRLF in the working tree.
+*.ps1   text eol=crlf
+*.bat   text eol=crlf
+*.cmd   text eol=crlf
+
+# These run on the Blue VM (Linux) or are consumed by Wazuh - LF in the working tree.
+*.py    text eol=lf
+*.sh    text eol=lf
+*.xml   text eol=lf
+*.yml   text eol=lf
+*.yaml  text eol=lf
+
+# Data and documentation - normalised in the repo, native on checkout.
+*.csv   text
+*.md    text
+*.json  text
+
+# Never touch these.
+*.png   binary
+*.jpg   binary
+*.pdf   binary
+*.docx  binary
+*.xlsx  binary
+*.pptx  binary
+*.gz    binary
+*.zip   binary
+*.evtx  binary

@@ -138,6 +138,71 @@ label = 0  OTHERWISE
 > alerts" once counts were computed programmatically. Discovered on technique 2 of 15, it cost one
 > re-export. Discovered after fifteen, it would have invalidated the entire dataset.
 
+> ### ⚠️ 2026-08-08 — the p99 was measuring the wrong thing. Buffer stays at 120s.
+>
+> The lag report recommended raising `--post-buffer` to **224s**, on an all-data p99 of 213.7s and a
+> claim that 16% of alerts fall outside their window at 120s. Acting on that would have widened every
+> gap to 254s+, added roughly four hours to the remaining seven techniques, and forced a re-export of
+> all eight completed ones. It was wrong, and the reason is worth recording because it is a general
+> hazard in this kind of measurement.
+>
+> **`report_lag` attributes every alert to the most recent window whose start precedes it, and then
+> calls the elapsed time "lag". But it cannot distinguish an alert that was *delayed* from an event
+> that simply *happened later*.** Two things pollute the tail:
+>
+> 1. **Cleanup telemetry.** `-CleanupBetweenRuns` fires ART's cleanup 130s after `window_end`
+>    deliberately. Nothing lagged — the deletion genuinely happened 130s later — but it is scored as
+>    130s+ of lag.
+> 2. **Ambient host activity.** Windows Update, VSS, service restarts. Any unrelated alert occurring in
+>    a gap is charged to the preceding window at whatever offset it happened to occur.
+>
+> The split by technique makes it unambiguous. **T1016 is the discriminating case** — it ran *after* the
+> 2026-08-07 18:00 cutover, so it shares the alleged degraded pipeline, but *without* cleanup:
+>
+> | Technique | Cleanup? | After cutover? | n | p50 | p90 | **p99** |
+> |---|---|---|---|---|---|---|
+> | **T1016** | no | **yes** | 143 | 10.4 | 65.0 | **81.5** |
+> | T1059.003 | no | yes | 67 | 9.3 | 43.6 | **43.7** |
+> | T1059.001 | no | yes | 569 | 19.4 | 31.4 | **114.0** |
+> | T1087.001 | no | no | 108 | 18.3 | 79.1 | 109.5 |
+> | T1082 | no | no | 298 | 15.3 | 58.1 | 136.7 |
+> | T1033 | no | yes | 344 | 6.2 | 53.5 | *294.4* ⚠️ |
+> | T1053.005 | **YES** | yes | 300 | 46.4 | 179.6 | 214.8 |
+> | T1136.001 | **YES** | yes | 525 | 19.8 | 164.1 | 299.3 |
+>
+> T1016 at **81.5s** is *faster* than the pre-cutover 111s. **The pipeline did not degrade.** The 4 GB
+> RAM change was innocent; the boundary at 18:00 was also when `-CleanupBetweenRuns` was introduced with
+> T1053.005, and that is the variable that actually moved.
+>
+> **T1033's p99 of 294.4s against a p90 of 53.5s is the ambient-noise case.** Roughly three alerts of 344
+> sit near 290s while 90% arrive inside 54s. Those are the rule 92219 Windows Update DLL drops already
+> noted in the coverage table for T1033 — real events, not delayed ones. A statistic that a handful of
+> unrelated alerts can move by 240s is not measuring delivery latency.
+>
+> **Conclusions, applied from here:**
+>
+> - **`--post-buffer` stays at 120s.** For non-cleanup techniques only **2% (30 of 1529)** of alerts fall
+>   outside their window at 120s; at 224s the gain is under one percent. Not worth four hours.
+> - **Quote p90, not p99, for forwarding lag.** p90 without cleanup is **44.4s**. p99 is dominated by
+>   events that never lagged.
+> - **Gaps drop to 150–210s** for the remaining techniques that do not need cleanup — which, on
+>   inspection, is most of them. `-CleanupBetweenRuns` was needed for T1053.005 and T1136.001 because
+>   both create *named* objects that cannot be created twice; registry writes, file drops and archive
+>   creation overwrite silently and do not collide. Verify per technique rather than assuming.
+> - **Where cleanup IS needed, the gap must stay ≥250s.** Cleanup fires at +130s and its own telemetry
+>   then takes p90 ≈ 45s to arrive, so the next window cannot safely open before ~250s. No buffer change
+>   fixes this; only excluding the cleanup interval from labelling would, and that is a larger change.
+> - **Do not re-export the completed eight.** They were measured at 120s and the measurement stands.
+>
+> **Method note worth keeping:** this was caught by asking "which technique separates the two competing
+> explanations?" rather than by arguing about the headline number. The cutover had two confounded causes
+> — a RAM change and a protocol change — and one technique, T1016, happened to have only one of them.
+> A first attempt to answer the same question with a standalone script produced a p50 of 200s against
+> `report_lag`'s 16s, because it attributed alerts to the *first* overlapping window rather than the most
+> recent one; with 300s tails and 180–300s gaps, every window's tail covers the next window entirely. The
+> broken script is retained as `scripts/lag_by_technique.py`, neutered, with the bug documented. **When a
+> fresh measurement disagrees with an established one by an order of magnitude, suspect the fresh one.**
+
 The ±buffer absorbs Sysmon → agent → manager forwarding lag, not clock skew (skew is ~0). Re-verify the
 timezone relationship at the start of each session — a VM snapshot revert or a DST transition can change
 it, and the UK leaves BST in late October, before the September deadline but worth knowing if work runs on.

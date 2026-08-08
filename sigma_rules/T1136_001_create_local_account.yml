@@ -1,0 +1,69 @@
+title: Local Account Created
+id: 8f3c1d42-6b90-4a7e-9c11-2d5a7e0b4c88
+status: experimental
+description: |
+  Detects creation of a local user account on Windows, from either the Security audit log
+  (event 4720) or process telemetry for the tools that perform it.
+
+  Authored for an MSc detection-engineering study after measuring that the Wazuh 4.14.6 default
+  ruleset detects this behaviour correctly but attributes it to the wrong ATT and CK technique:
+  rule 60109 ("User account enabled or created") is tagged T1098 Account Manipulation rather than
+  T1136.001, and local group membership changes are tagged T1484 Domain Policy Modification on a
+  workgroup host that has no domain policy. The detection logic is sound; the mapping is not.
+  This rule therefore exists to correct attribution, not to add coverage.
+references:
+  - https://attack.mitre.org/techniques/T1136/001/
+  - https://github.com/redcanaryco/atomic-red-team/blob/master/atomics/T1136.001/T1136.001.md
+  - https://learn.microsoft.com/en-us/windows/security/threat-protection/auditing/event-4720
+author: Abdul Basit Mohammed (c5038891), Sheffield Hallam University
+date: 2026-08-08
+tags:
+  - attack.persistence
+  - attack.t1136.001
+logsource:
+  product: windows
+detection:
+  # Authoritative: the OS itself says an account was created.
+  security_4720:
+    EventID: 4720
+    Channel: Security
+
+  # Process-level provenance: which tool did it, under which parent.
+  proc_net_add:
+    EventID: 1
+    Channel: Microsoft-Windows-Sysmon/Operational
+    OriginalFileName:
+      - 'net.exe'
+      - 'net1.exe'
+    CommandLine|re: '(?i)\s+user\b.*?\s/add\b'
+
+  proc_powershell_create:
+    EventID: 1
+    Channel: Microsoft-Windows-Sysmon/Operational
+    OriginalFileName|startswith: 'PowerShell'
+    CommandLine|re: '(?i)(New-LocalUser|AccountManagement\.UserPrincipal|ADSI.*\bCreate\b.*user)'
+
+  condition: security_4720 or proc_net_add or proc_powershell_create
+falsepositives:
+  - Routine account provisioning by IT, service-account creation by installers, and imaging or
+    join workflows. Measured in this lab as a both-classes signal, so it is a triage input rather
+    than a standalone verdict.
+level: medium
+---
+# Implementation notes (not part of the Sigma rule)
+#
+# Wazuh translation: wazuh_rules/local_rules.xml rules 100280-100283.
+#
+# * `security_4720` maps to rule 100280, which chains from the built-in 60109 with `if_sid` and adds
+#   nothing but a corrected `<mitre>` block. This is the cheap remediation class: the SIEM already
+#   detects it, so only the label needs fixing.
+# * `proc_net_add` maps to 100281. The regex terminates the `user` keyword with `\b` rather than `\s`
+#   so that it matches BOTH `net user /add "name" "pass"` (the atomic's form) and
+#   `net user name pass /add` (the form an administrator types). An earlier draft matched only the
+#   second and would have missed every detonation.
+# * `proc_powershell_create` maps to 100282, and shares the known limitation recorded for 100233:
+#   it only sees cmdlets passed on a command line. Cmdlets typed into an interactive session create
+#   no process and are invisible to Sysmon EID 1. Script Block Logging (EID 4104) is the fix, and is
+#   a recommendation of this project rather than a change made to the measured environment.
+# * Local group membership change is deliberately NOT part of this rule. It is T1098, and rule 100283
+#   re-attributes it away from the default T1484 mapping.

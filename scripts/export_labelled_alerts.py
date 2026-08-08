@@ -274,15 +274,32 @@ def classify_exclusion(alert):
     return None
 
 
-def report_lag(alerts_path, windows):
+def report_lag(alerts_patterns, windows):
     """Measure Sysmon -> agent -> manager forwarding lag, which sets the correct POST_BUFFER.
 
     For each alert, attribute it to the most recent window whose start precedes it, then measure how
     long after that window_end the alert actually arrived. Load-dependent, so re-run every session.
     """
-    wins = sorted((w["start"], w["end"], w["session_id"]) for w in windows)
-    lags = []
-    with open(alerts_path, encoding="utf-8", errors="replace") as fh:
+    # ⚠️ Attribute each alert to the MOST RECENT window whose start precedes it (`prior[-1]` below).
+    # A standalone re-implementation of this on 2026-08-08 took the FIRST window whose +300s tail
+    # contained the alert instead, and reported a p50 of ~200s against this function's 16s. With
+    # 180-300s gaps every window's 300s tail overlaps the whole of the next window, so alerts
+    # belonging to window N+1 were charged to window N. If a lag figure looks large, check the
+    # attribution rule before believing it.
+    wins = sorted((w["start"], w["end"], w["session_id"], w["technique_id"]) for w in windows)
+    # Same multi-file + gzip + dedup handling as the main path. --alerts is a LIST of paths/globs; an
+    # earlier version of this function took a single path and crashed once --alerts became nargs="+".
+    files = iter_alert_files(alerts_patterns)
+    if not files:
+        print(f"No alert files matched: {alerts_patterns}")
+        return
+    print(f"Reading {len(files)} alert file(s) for lag measurement:")
+    for p in files:
+        print(f"  {p}")
+
+    lags, seen_ids = [], set()
+    for path in files:
+      with open_alert_file(path) as fh:
         for line in fh:
             line = line.strip()
             if not line:
@@ -291,6 +308,11 @@ def report_lag(alerts_path, windows):
                 alert = json.loads(line)
             except json.JSONDecodeError:
                 continue
+            aid = alert.get("id")
+            if aid:
+                if aid in seen_ids:
+                    continue
+                seen_ids.add(aid)
             if dig(alert, "agent", "name") != TARGET_AGENT:
                 continue
             ts = parse_alert_ts(alert.get("timestamp"))
@@ -301,23 +323,91 @@ def report_lag(alerts_path, windows):
                 continue
             lag = (ts - prior[-1][1]).total_seconds()
             if -10 <= lag <= 300:
-                lags.append(lag)
+                lags.append((lag, ts, prior[-1][3]))
 
     if not lags:
         print("No alerts fell within 300s of any window - cannot measure lag.")
         return
-    lags.sort()
-    print(f"Forwarding-lag distribution over {len(lags)} alerts within 300s of a window_end:")
-    for p in (50, 75, 90, 95, 99):
-        print(f"  p{p:<3d} {lags[min(int(len(lags) * p / 100), len(lags) - 1)]:7.1f}s")
-    print(f"  max  {lags[-1]:7.1f}s")
-    rec = int(lags[min(int(len(lags) * 0.99), len(lags) - 1)]) + 10
-    print(f"\nRecommended --post-buffer: {rec}s (measured p99 + 10s margin)")
-    print(f"Inter-run gap in Invoke-LabRun.ps1 must EXCEED that, or windows overlap:"
-          f" set -MinGapSeconds to at least {rec + 60}.")
-    for cut in (30, 60, 120, 180):
-        n = sum(1 for l in lags if l > cut)
-        print(f"  at a +{cut}s buffer, {n} of {len(lags)} alerts ({100*n/len(lags):.0f}%) fall outside their window")
+
+    def summarise(vals, label):
+        vals = sorted(vals)
+        if not vals:
+            print(f"\n{label}: no data")
+            return None
+        print(f"\n{label} - {len(vals)} alerts within 300s of a window_end:")
+        for p in (50, 75, 90, 95, 99):
+            print(f"   p{p:<3d} {vals[min(int(len(vals) * p / 100), len(vals) - 1)]:7.1f}s")
+        print(f"   max  {vals[-1]:7.1f}s")
+        for cut in (30, 60, 90, 120, 180):
+            n = sum(1 for v in vals if v > cut)
+            print(f"     at +{cut:3d}s buffer: {n:4d} of {len(vals)} ({100*n/len(vals):.0f}%) fall outside their window")
+        return vals[min(int(len(vals) * 0.99), len(vals) - 1)]
+
+    all_p99 = summarise([l for l, _, _ in lags], "ALL DATA")
+
+    # ------------------------------------------------------------------------------------------
+    # Is the tail real, or is it cleanup telemetry being counted as lag?
+    #
+    # -CleanupBetweenRuns fires ART's cleanup 130s AFTER window_end, deliberately, so its deletion
+    # telemetry lands in dead time. But this function cannot distinguish "this alert was delayed by
+    # 130s" from "this event genuinely happened 130s later" - both look identical from the alert
+    # timestamp. So every cleanup deletion is counted as a lagging alert when nothing lagged.
+    #
+    # That matters because the cutover at 2026-08-07 18:00 was read as a RAM change, but it is ALSO
+    # when -CleanupBetweenRuns was introduced (T1053.005). Two explanations, one boundary. The p50
+    # barely moved (15.3 -> 16.6s) while p90 went 58 -> 149s; a genuinely congested pipeline moves the
+    # median too, so a pure tail shift points at added late events rather than slower delivery.
+    #
+    # The discriminating test is T1016: it ran after the cutover but WITHOUT cleanup. If its p99 sits
+    # near 110s the tail is a cleanup artefact and the 120s buffer stands. If it sits near 215s the
+    # pipeline really did degrade and every technique so far needs re-exporting at a wider buffer.
+    CLEANUP_TECHNIQUES = {"T1053.005", "T1136.001"}   # ⚠️ append to this whenever a phase uses the flag
+
+    by_tech = {}
+    for l, t, tech in lags:
+        by_tech.setdefault(tech, []).append(l)
+    print("\n--- lag by technique (does cleanup explain the tail?) ---")
+    print("technique     cleanup?  after-cutover?      n     p50     p90     p99")
+    for tech in sorted(by_tech):
+        v = sorted(by_tech[tech])
+        after = any(t >= datetime(2026, 8, 7, 18, 0, tzinfo=timezone.utc)
+                    for l, t, tc in lags if tc == tech)
+        q = lambda p: v[min(int(len(v) * p / 100), len(v) - 1)]
+        print(f"{tech:<13} {'YES' if tech in CLEANUP_TECHNIQUES else 'no ':<9} "
+              f"{'yes' if after else 'no ':<15} {len(v):>5} {q(50):>7.1f} {q(90):>7.1f} {q(99):>7.1f}")
+
+    nocl = summarise([l for l, _, tc in lags if tc not in CLEANUP_TECHNIQUES],
+                     "WITHOUT -CleanupBetweenRuns")
+    withcl = summarise([l for l, _, tc in lags if tc in CLEANUP_TECHNIQUES],
+                       "WITH -CleanupBetweenRuns")
+    if nocl is not None and withcl is not None:
+        print(f"\n  p99 without cleanup: {nocl:.0f}s   with cleanup: {withcl:.0f}s")
+        if withcl > nocl + 40:
+            print("  => the tail is largely CLEANUP TELEMETRY, not forwarding delay. Size the buffer")
+            print(f"     from the no-cleanup figure ({int(nocl) + 10}s) and exclude cleanup intervals")
+            print("     from the measurement instead of widening the buffer for everything.")
+        else:
+            print("  => cleanup does NOT explain the tail; the pipeline is genuinely slower. Widen the")
+            print("     buffer and re-export every technique measured so far.")
+
+    # Split at the point the endpoint went from 3 GB to 4 GB RAM. The lag tail is load-dependent, so the
+    # two halves may differ - and the buffer has to cover the WORST of them, since one buffer is applied
+    # to the whole dataset at export time.
+    CUTOVER = datetime(2026, 8, 7, 18, 0, tzinfo=timezone.utc)
+    old_p99 = summarise([l for l, t, _ in lags if t < CUTOVER], "BEFORE 2026-08-07 18:00 UTC (endpoint at 3 GB)")
+    new_p99 = summarise([l for l, t, _ in lags if t >= CUTOVER], "AFTER  2026-08-07 18:00 UTC (endpoint at 4 GB)")
+
+    print("\n--- what this means for the buffer and the gaps ---")
+    worst = max(v for v in (all_p99, old_p99, new_p99) if v is not None)
+    rec = int(worst) + 10
+    print(f"  One buffer is applied to the WHOLE dataset, so it must cover the worst p99: {worst:.0f}s")
+    print(f"  Recommended --post-buffer: {rec}s")
+    print(f"  -CleanupBetweenRuns needs -MinGapSeconds >= {rec + 30} (cleanup must land past the buffer)")
+    if new_p99 is not None and old_p99 is not None and new_p99 < old_p99 - 20:
+        print(f"  NOTE: the recent half is faster ({new_p99:.0f}s vs {old_p99:.0f}s). A smaller buffer would")
+        print( "  suit new data but would drop alerts from the older techniques. To exploit it you would")
+        print( "  have to record the buffer per window and label in two passes - only worth it if the gap")
+        print( "  cost is genuinely blocking.")
 
 
 def main():

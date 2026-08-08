@@ -342,7 +342,23 @@ for ($i = 1; $i -le $Repeat; $i++) {
     if ($i -lt $Repeat) {
         $gap = Get-Random -Minimum $MinGapSeconds -Maximum ($MaxGapSeconds + 1)
 
-        if ($CleanupBetweenRuns) {
+        # ⚠️ The `-and $Type -eq 'attack'` guard was MISSING until 2026-08-08 and it caused real
+        # contamination. Both the pre-run block and the final block were already guarded; this one was
+        # not. The effect: a BENIGN run launched with -CleanupBetweenRuns executed
+        # `Invoke-AtomicTest <id> -Cleanup` between its runs, i.e. it ran the ATOMIC's cleanup commands
+        # inside the benign phase. For T1136.001 those commands delete T1136.001_CMD and
+        # T1136.001_Admin, so ART account names appeared in benign-class telemetry.
+        #
+        # Two of the 72 benign alerts in the T1136.001 baseline referenced those names. I first
+        # attributed that to attack-phase cleanup telemetry arriving late - WRONG, the timings rule it
+        # out (run 5's cleanup fired ~04:20:51, the first benign window opened 04:25:44, far beyond the
+        # p99 lag of 111 s). The cause was this missing guard.
+        #
+        # Benign mirrors are self-cleaning by construction (see the $BenignMirror note above), so they
+        # never need the flag. Guarding here means passing it by mistake is harmless rather than
+        # silently poisoning the negative class - which is the more dangerous direction, because a
+        # contaminated benign class teaches the triage model that attack artefacts are normal.
+        if ($CleanupBetweenRuns -and $Type -eq 'attack') {
             # Wait out the previous window's label buffer FIRST, so the cleanup's deletion telemetry is
             # attributed to no window at all, then restore a clean state for the next run.
             Write-Host "Idle $CLEANUP_DELAY s so run $i's label buffer expires before cleanup..." -ForegroundColor DarkGray

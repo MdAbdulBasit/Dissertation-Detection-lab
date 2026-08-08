@@ -53,7 +53,11 @@
     <if_group>sysmon_eid1_detections</if_group>
     <field name="win.eventdata.originalFileName" type="pcre2">(?i)net1?\.exe</field>
     <field name="win.eventdata.commandLine" type="pcre2">(?i)\s+(user|localgroup|group|accounts)\b</field>
-    <field name="win.eventdata.commandLine" type="pcre2" negate="yes">(?i)\s/(add|delete|active)\b</field>
+    <!-- /del is a valid abbreviation of /delete and net.exe accepts it. The first version of this
+         negation matched only the long form, so `net user /del <name>` still fired 100200 and account
+         DELETION was reported as account DISCOVERY. Observed twice in the T1136.001 baseline. Windows
+         command-line switches are routinely abbreviated - match the short forms too. -->
+    <field name="win.eventdata.commandLine" type="pcre2" negate="yes">(?i)\s/(add|delete|del|active|act)\b</field>
     <description>T1087.001 Local Account Discovery via net.exe</description>
     <mitre>
       <id>T1087.001</id>
@@ -312,6 +316,92 @@
     <description>T1053.005 Scheduled Task created or modified via PowerShell or WMI</description>
     <mitre>
       <id>T1053.005</id>
+    </mitre>
+  </rule>
+
+  <!--
+    ===================================================================================================
+    T1136.001 Create Local Account
+    Custom rule IDs 100280-100283 | level 10 (100283 level 8)
+
+    NOTE: no literal ampersand appears anywhere in this file. Wazuh parses rule files with its own
+    OS_ReadXML, not a standards-compliant parser, and a bare ampersand has been known to fail the load
+    even inside a comment. "ATTACK" below means MITRE ATT and CK.
+
+    MEASURED BASELINE (2026-08-08, 5+5 windows, atomics 4/5/8/9, 156 attack alerts):
+    a DIFFERENT failure mode from the previous seven - the default ruleset detects the behaviour
+    accurately and describes it correctly, then tags it with the WRONG ATTACK technique:
+
+        60109  "User account enabled or created"   -> T1098 Account Manipulation
+        60110  "User account changed"              -> T1098
+        60111  "User account disabled or deleted"  -> T1098 + T1531
+        60154  "Administrators Group Changed"      -> T1484 Domain Policy Modification
+        60160  "Domain Users Group Changed"        -> T1484
+        60170  "Users Group Changed"               -> T1484
+
+    Rule 60109 fires on Windows Security event 4720, whose literal meaning is "a user account was
+    created" - that is T1136.001 by definition. Wazuh maps it to T1098 Account Manipulation, a SIBLING
+    technique. And the group rules map local group membership changes to T1484 Domain Policy
+    Modification, which is not only the wrong technique but describes a domain mechanism this
+    WORKGROUP-only endpoint does not have.
+
+    So this is SIBLING MISATTRIBUTION: same tactic family, adjacent technique, correct description.
+    Distinct from T1087.001 (parent-only), T1082/T1016/T1053.005 (wrong tactic entirely) and T1033
+    (partial coverage). Arguably the most insidious of the five, because the alert text reads correctly
+    and only the ATTACK tag is wrong - so a coverage matrix built from these mappings would show
+    T1136.001 as uncovered while showing T1098 and T1484 as covered, both incorrectly.
+
+    APPROACH: 100280 REFINES rather than duplicates. It chains from 60109 via if_sid, so the default
+    rule still does the detecting and the custom rule corrects the attribution. That is a different and
+    cheaper remediation than writing detection from scratch, and worth contrasting in the write-up with
+    T1082/T1016 where no default detection existed to refine.
+    ===================================================================================================
+  -->
+
+  <rule id="100280" level="10">
+    <if_sid>60109</if_sid>
+    <description>T1136.001 Local account created (re-attributed from T1098)</description>
+    <mitre>
+      <id>T1136.001</id>
+    </mitre>
+  </rule>
+
+  <rule id="100281" level="10">
+    <if_group>sysmon_eid1_detections</if_group>
+    <field name="win.eventdata.originalFileName" type="pcre2">(?i)^net1?\.exe$</field>
+    <!-- Argument order is NOT fixed: the atomic uses `net user /add "name" "pass"` while an
+         administrator more often types `net user name pass /add`. Two drafts failed a dry-run against
+         both forms before this one - the first required a token between `user` and `/add`, the second
+         wrote `\s+user\s.*\s/add` which consumes the single space in `user /add` and then demands a
+         second one. Terminate the keyword with `\b`, not `\s`, so the separator stays available.
+         `localgroup` cannot match because it lacks the `user` keyword. -->
+    <field name="win.eventdata.commandLine" type="pcre2">(?i)\s+user\b.*?\s/add\b</field>
+    <description>T1136.001 Local account created via net user /add</description>
+    <mitre>
+      <id>T1136.001</id>
+    </mitre>
+  </rule>
+
+  <rule id="100282" level="10">
+    <if_group>sysmon_eid1_detections</if_group>
+    <field name="win.eventdata.originalFileName" type="pcre2">(?i)^powershell(\.exe)?$</field>
+    <field name="win.eventdata.commandLine" type="pcre2">(?i)(New-LocalUser|AccountManagement\.UserPrincipal|ADSI.*\bCreate\b.*user)</field>
+    <description>T1136.001 Local account created via PowerShell or .NET</description>
+    <mitre>
+      <id>T1136.001</id>
+    </mitre>
+  </rule>
+
+  <!-- 100283: local group membership change. NOT T1136.001 - adding an existing principal to a group is
+       T1098 Account Manipulation. Included here because the default rules 60154/60160/60170 tag it
+       T1484 Domain Policy Modification, which is wrong on two counts: wrong technique, and a domain
+       mechanism this WORKGROUP endpoint does not have. Kept at level 8 (below the creation rules) so
+       the ordering of alert severity reflects the ordering of adversary progress. -->
+  <rule id="100283" level="8">
+    <if_sid>60154, 60160, 60170</if_sid>
+    <description>T1098 Local group membership changed (re-attributed from T1484)</description>
+    <mitre>
+      <id>T1098</id>
     </mitre>
   </rule>
 

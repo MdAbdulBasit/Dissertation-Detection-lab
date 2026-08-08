@@ -32,7 +32,7 @@ sudo systemctl restart wazuh-manager
 | 100250–100259 | T1016 Network Config Discovery | Discovery | 1 | **100250, 100251, 100252** | 🟡 Written, not yet deployed — see note 4 |
 | 100260–100269 | T1547.001 Registry Run Keys | Persistence | 13 | — | Not started |
 | 100270–100279 | T1053.005 Scheduled Task | Persistence | 1 | **100270, 100271** | 🟡 Written, not yet deployed — see note 7 |
-| 100280–100289 | T1136.001 Create Local Account | Persistence | 1 | — | Not started |
+| 100280–100289 | T1136.001 Create Local Account | Persistence | 1 / **Security 4720** | **100280, 100281, 100282, 100283** | ✅ Deployed + smoke-tested 2026-08-08 — see note 8 |
 | 100290–100299 | T1112 Modify Registry | Defense Evasion | 13 | — | Not started |
 | 100300–100309 | T1218.011 Rundll32 | Defense Evasion | 1 | — | Not started |
 | 100310–100319 | T1070.004 File Deletion | Defense Evasion | 11/23 | — | Not started |
@@ -325,3 +325,84 @@ have parent `cmd.exe` and match built-in rule `92032`, which is what places them
 `sysmon_eid1_detections` — the group `100270` chains from. Without a `cmd.exe` parent the event never
 enters that group and the child rule has nothing to chain onto. **Smoke tests must reproduce the atomic's
 process lineage, not merely run the same binary.** Confirmed by retesting through `cmd.exe /c`.
+
+---
+
+### Note 8 — T1136.001 rules `100280`–`100282`, and a fifth failure mode
+
+Baseline over 5+5 windows (atomics 4, 5, 8, 9): **156 attack / 72 benign**. The default ruleset behaved
+differently here from all seven earlier techniques — it **detects the behaviour accurately and describes
+it correctly, then tags it with the wrong ATT&CK technique**:
+
+| Default rule | Description | Maps to | Should be |
+|---|---|---|---|
+| `60109` | *"User account enabled or created"* | **T1098** | **T1136.001** |
+| `60110` | *"User account changed"* | T1098 | T1098 ✓ |
+| `60111` | *"User account disabled or deleted"* | T1098 + T1531 | T1531 ✓ |
+| `60154` | *"Administrators Group Changed"* | **T1484** | T1098 |
+| `60160` | *"Domain Users Group Changed"* | **T1484** | T1098 |
+| `60170` | *"Users Group Changed"* | **T1484** | T1098 |
+
+`60109` fires on Windows Security event **4720**, whose literal meaning is "a user account was created" —
+T1136.001 by definition. And the group rules map *local* group membership changes to **T1484 Domain
+Policy Modification**, a domain mechanism this WORKGROUP endpoint does not possess.
+
+**Fifth failure mode: SIBLING MISATTRIBUTION.** Same tactic family, adjacent technique, correct
+description. Arguably the most insidious of the five — the alert text reads correctly and only the tag is
+wrong, so a coverage matrix built from these mappings shows T1136.001 as uncovered while showing T1098
+and T1484 as covered, both incorrectly.
+
+**`100280` REFINES rather than duplicates.** It chains from `60109` via `if_sid`, so the default rule
+still performs the detection and the custom rule only corrects the attribution. That is a cheaper class
+of remediation than the from-scratch detection needed for T1082 and T1016, and the contrast is worth
+drawing in the write-up: *some* SIEM gaps are mapping errors fixable in one line, others are genuine
+blind spots.
+
+**🔎 Independent confirmation of the error class — the vendor ruleset makes the same mistake.**
+
+The smoke test for `100280`–`100283` was greped out of `alerts.json` alongside the built-in rules, and
+two default rules turned out to be firing on *every* account-modification command:
+
+```
+92039  "A net.exe account discovery command was initiated"
+         net1  user SmokeAcct Lab#Smoke2026 /add     <- CREATION  reported as discovery
+         net1  user SmokeAcct /delete                <- DELETION  reported as discovery
+         net1  user LabBenignSvc Lab#Benign2026 /add
+         net1  user LabSmoke281 /del
+92031  "Discovery activity executed"
+         net1  localgroup administrators "T1136.001_Admin" /add     <- group ADD    as discovery
+         net1  localgroup administrators LabSmoke281 /delete        <- group REMOVE as discovery
+```
+
+Every one of those is a **modification**, not an enumeration. The default ruleset therefore classifies
+account creation, account deletion, group addition and group removal all as **Discovery** — a
+tactic-level error across four distinct behaviours.
+
+This matters more than the individual finding. Rule `100200` had exactly this defect twice (`/add`, then
+`/del`), and both times it was my own authoring error. Finding the identical error in the shipped Wazuh
+ruleset shows the failure mode is **structural, not personal**: substring-matching on a multi-purpose
+binary's command line without excluding the modifying switches is a trap that a vendor with a full
+detection-engineering team fell into as well. That reframes the contribution — the project is not
+"Wazuh got it wrong and I got it right", it is "this class of rule is systematically fragile, here is
+how to test for it".
+
+**Alerts are corrected by ADDITION, not REPLACEMENT — and that raises volume.** `100281` and `92039` both
+fire on the same `net user /add` event, because `92039` sits at a different depth in the rule chain than
+a direct child of `sysmon_eid1_detections`. So the endpoint now emits one correct alert and one wrong one
+for the same action. Only the Security-log side gets true displacement, where `100280`/`100283` chain via
+`if_sid` and suppress the parent. This is left in place deliberately rather than papered over with
+`overwrite="yes"`, because it is an honest operational result: **bolting local rules onto a SIEM does not
+remove the misattributed alerts, it adds correct ones alongside them, increasing analyst load in the
+short term.** That is a direct argument for the triage layer, and it should be quantified in the results
+chapter as alerts-per-detonation before and after.
+
+**Before/after evidence is in a single log file.** Group-change events before 05:02 UTC on 2026-08-08 show
+bare `60154`/`60160`/`60170`; the same events after the manager restart show `100283`. Same host, same
+event type, ruleset changed at a known timestamp — usable as a figure without further processing.
+
+**⚠️ Second defect found in rule 100200.** The negation added earlier that day excluded `/add`, `/delete`
+and `/active` — but Windows accepts `/del`, and `net user /del <name>` therefore still fired 100200,
+reporting account **deletion** as account **discovery**. Observed twice in this baseline. Regex widened to
+`(add|delete|del|active|act)`. General lesson: **Windows command-line switches are routinely abbreviated;
+match the short forms.** This is the second precision defect found in the same rule, both by checking
+which existing rules fire on the *next* technique's commands.
