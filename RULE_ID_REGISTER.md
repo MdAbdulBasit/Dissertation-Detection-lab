@@ -345,6 +345,104 @@ process lineage, not merely run the same binary.** Confirmed by retesting throug
 
 ---
 
+### Note 12 — T1560.001: predictions recorded before detonating
+
+Written 2026-08-09 **before** the baseline run. Fourth technique pre-registered.
+
+**Every default rule claiming T1560 depends on a logging feature that is switched off.** `91825`
+(`Compress-7Zip`), `91826` (`Copy-Item`), `91827`, `91846` (`::CreateFromDirectory`) all chain from
+`91802` — **PowerShell Script Block Logging, EID 4104** — and `EnableScriptBlockLogging` is unset on this
+endpoint, verified by query during T1112. Nothing else in the ruleset maps to T1560.
+
+That is the T1112 wall reached by a different route: not a sensor filter, but a **Windows logging feature
+that is off by default**. And the two connect — **T1112's atomic 33 disables PowerShell logging**, so an
+adversary who performs Modify Registry first blinds the only detection Wazuh has for Archive via Utility.
+A measurable technique-chaining dependency, not a hypothetical one.
+
+**FALSIFIABLE PREDICTIONS:**
+
+1. **Zero** T1560.001 attribution in the baseline, from any rule.
+2. **Zero** alerts from `91825`/`91826`/`91846` — they cannot fire without EID 4104.
+3. The `.cab` output produces no file-create alert: `92200` matches only
+   `\.(bat|cmd|lnk|pif|vbs|vbe|js|wsh|ps1)`, and `.cab`/`.zip` are absent from that list.
+4. What fires instead is generic process-creation telemetry for `makecab.exe`.
+
+**⚠️ ONLY 1 OF 12 ATOMICS IS USABLE, and that is a finding about the test set rather than a limitation
+to apologise for.** Tests **1–4** require rar / winrar / winzip / 7zip to be installed — third-party
+archivers this endpoint does not have, and installing them mid-study changes the environment being
+measured. Test **10** targets ESXi. Test **12** copies the **entire AppData tree** and zips it, which on
+a 4 GB endpoint takes minutes and would balloon the window far past comparability — the same reason
+T1082's test 28 and T1218.011's test 2 were excluded. That leaves **test 11, `makecab.exe`**, the only
+built-in Windows archiver in the set.
+
+The narrowness is itself worth reporting: ATT&CK's Archive via Utility is dominated by third-party
+tooling, so on a clean Windows host the technique reduces to `makecab` and `tar` — and neither appears
+anywhere in the default ruleset.
+
+---
+
+### Note 11 — T1218.011: predictions recorded before detonating
+
+Written 2026-08-09 **before** the baseline run. Third technique pre-registered this way.
+
+**Default coverage is two rules, and one of them is structurally dead on this host.**
+
+| Rule | Lvl | Condition | Verdict |
+|---|---|---|---|
+| `92079` | 10 | `if_sid 92078` + commandLine contains `rundll32` | **can never fire here** |
+| `92081` | 15 | `originalFileName = RUNDLL32.EXE` + commandLine matching `\.(html\|htm\|txt\|png\|jpg\|pdf)"*,#` | very narrow |
+
+`92078` requires **`currentDirectory = E:\` AND `cmd.exe` in the command line** — an ISO-mount scenario,
+and it is itself mapped to **T1204.002 User Execution**, not T1218.011. This endpoint has no E: drive.
+So `92079`, the only general-looking rundll32 rule, is gated behind a condition that cannot occur, and
+T1218.011's real coverage is `92081` alone.
+
+**FALSIFIABLE PREDICTIONS:**
+
+1. **Zero** alerts carrying rule id `92079` — its parent's `E:\` condition cannot be met.
+2. **Zero** alerts carrying `92081` — the atomics load `.dll` exports and the `vbscript:` handler, none
+   of which match its document-extension pattern.
+3. Therefore **zero T1218.011 attribution in the baseline**, from any rule.
+4. What fires instead is generic execution telemetry (`92052`/`92004`/`92032` → T1059.x), the same
+   wrong-tactic pattern as T1082, T1016 and T1112 — Defense Evasion read as Execution.
+
+**Test set 9, 15, 16** — `pcwutl.dll,LaunchApplication`, `url.dll,FileProtocolHandler`, and
+`zipfldr.dll,RouteTheCall`. Each verified to exit cleanly with code 0 before the phase ran.
+
+**Three tests excluded, each for a measured reason rather than a judgement call:**
+
+- **Test 2** — *excluded after a failed first run, not in advance.* The `vbscript:`/`RunHTMLApplication`
+  handler never terminates: rundll32 persists as an HTA host until ART's 120s timeout kills it
+  (`Exit code: -1`). Window 1 measured **193 seconds** against ~10s for its siblings. Same defect that
+  excluded T1082's test 28 — a hanging atomic inflates the window, and a 193s window with a 120s buffer
+  sweeps in far more ambient telemetry than the others, so its counts are not comparable. Attack run 1
+  of the aborted phase is superseded with this reason.
+- **Test 12** — downloads `calc.dll` from GitHub at runtime. A network dependency converts a detection
+  failure into an environmental one; same reasoning as WinPwn, PowerView, Mimikatz.
+- **Test 13** — `copy %windir%\System32\calc.exe not_an_scr.scr` with no `/Y`, so runs 2–5 hit an
+  *"Overwrite? (Yes/No/All)"* prompt. **The third time this exact trap has appeared** (T1053.005's task
+  collision, T1547.001's `REG ADD` without `/F`). Caught in preflight rather than mid-phase.
+
+**⚠️ Mirror asymmetry, recorded rather than engineered away.** The mirror covers
+`pcwutl.dll,LaunchApplication` and `url.dll,FileProtocolHandler` — the two atomic mechanisms with real
+administrative counterparts — plus `shell32.dll,Control_RunDLL desk.cpl`, which is what happens whenever
+anyone opens Display Settings. It does **not** cover `zipfldr.dll,RouteTheCall`, which has no plausible
+benign invocation from a command line. Consequence for analysis: a rule keyed on *"rundll32 with a
+DLL,Export"* should fire in both classes, while a rule naming `zipfldr` specifically would be attack-only
+**by mirror scope** — the `100241`/`100251` category, not the `100260` category. The distinction matters
+and the two must not be reported the same way.
+
+**⚠️ One mirror mechanism deliberately omitted, and it is the opposite of the earlier mirror defects.**
+The benign mirror covers `pcwutl.dll,LaunchApplication`, `url.dll,FileProtocolHandler` and
+`shell32.dll,Control_RunDLL desk.cpl`, but **not** atomic 2's `vbscript:"\..\mshtml,RunHTMLApplication`.
+That construction has no legitimate administrative use; writing a benign counterpart would manufacture a
+false negative. If a rule keyed on it comes out attack-only, that is a **genuine discriminator** — the
+same status as `100260` — and must be reported differently from `100241`/`100251`/`100271`/`100282`,
+which were attack-only because the *mirror* was too narrow rather than because the *behaviour* has no
+benign form.
+
+---
+
 ### Note 10 — T1112: predictions recorded before detonating, and a likely SEVENTH failure mode
 
 Written 2026-08-08 **before** the baseline run, from reading the ruleset and the agent config. Same

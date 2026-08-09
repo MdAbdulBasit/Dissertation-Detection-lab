@@ -637,9 +637,43 @@
     </mitre>
   </rule>
 
+  <!--
+    ⚠️ PRECISION FIX 2026-08-09, found while measuring T1218.011 - the same way rule 100200's two
+    defects were found, by watching an existing rule behave on the NEXT technique's traffic.
+
+    The original condition was `\\Internet Settings\\(ZoneMap|Zones)\\`, which matched anywhere under
+    ZoneMap. Measured over the whole dataset: 414 alerts, of which
+
+        98  ZoneMap\ProxyBypass          <- Windows background housekeeping
+        98  ZoneMap\IntranetName         <- "
+        98  ZoneMap\UNCAsIntranet        <- "
+        98  ZoneMap\AutoDetect           <- "
+        11  ZoneMap\ProtocolDefaults\http    <- the actual technique
+        11  ZoneMap\ProtocolDefaults\https   <- "
+
+    95% noise. It swamped T1218.011 with 88 attack / 108 benign alerts - four times every other rule in
+    that technique combined - and would have swamped every remaining technique too.
+
+    THIS IS THE SAME DEFECT CLASS I DOCUMENTED IN 92041 THE PREVIOUS DAY, written while documenting it.
+    That is worth stating plainly rather than quietly fixing: a broad path regex looks correct in review
+    because every string it matches is genuinely "in the right area", and only measurement against
+    unrelated traffic exposes it. It is not a vendor failing, it is a property of writing detections by
+    pattern - which is the argument the whole project makes.
+
+    ⚠️ IT WAS ALSO SELF-INFLICTED TWICE OVER: these events only exist because we widened the Sysmon
+    config for T1112's third phase. Adding telemetry improved coverage AND created the noise, in the
+    same change. That tradeoff is the alert-fatigue result demonstrated on our own ruleset.
+
+    Narrowed to the subkeys where a write is security-relevant: ProtocolDefaults (protocol-to-zone
+    mapping), Domains/EscDomains (adding a site to a trusted zone), and Zones (per-zone security
+    settings such as enabling scripting). ZoneMap's scalar housekeeping values are excluded.
+
+    ⚠️ ALREADY-COLLECTED ALERTS KEEP rule id 100262 - a rule change is not retroactive. T1112's recorded
+    counts are therefore split at analysis time on target_object rather than by re-running the phase.
+  -->
   <rule id="100262" level="8">
     <if_group>sysmon_event_13</if_group>
-    <field name="win.eventdata.targetObject" type="pcre2">(?i)\\\\Internet Settings\\\\(ZoneMap|Zones)\\\\</field>
+    <field name="win.eventdata.targetObject" type="pcre2">(?i)\\\\Internet Settings\\\\(ZoneMap\\\\(ProtocolDefaults|Domains|EscDomains)|Zones)\\\\</field>
     <description>T1112 Internet security zone configuration modified: $(win.eventdata.targetObject)</description>
     <mitre>
       <id>T1112</id>
@@ -668,6 +702,88 @@
     <description>T1112 Registry value written via reg.exe (re-attributed from T1027 Obfuscated Files)</description>
     <mitre>
       <id>T1112</id>
+    </mitre>
+  </rule>
+
+  <!--
+    ===================================================================================================
+    T1218.011 System Binary Proxy Execution: Rundll32
+    Custom rule IDs 100300-100302 | levels 6-12
+
+    MEASURED BASELINE (2026-08-09, 5+5 windows, atomics 9/15/16, 32 attack / 24 benign):
+    ZERO T1218.011 attribution from any rule. Only two default rules claim the technique and neither
+    can see ordinary rundll32 abuse:
+
+      92079 (L10) chains from 92078, which requires currentDirectory=E:\ AND cmd.exe in the command
+            line - an ISO-mount scenario - and 92078 is itself mapped to T1204.002 User Execution.
+            This endpoint has no E: drive, so the only general-looking rundll32 rule is STRUCTURALLY
+            DEAD here: gated behind a condition that cannot occur.
+      92081 (L15) needs the payload to be .html/.htm/.txt/.png/.jpg/.pdf with the ,#ordinal syntax.
+
+    What fired instead: 92032 (T1087 + T1059.003), 92052 and 92004 (T1059.003), 92027 (T1059.001).
+    Defense Evasion read as Execution and Account Discovery - the same wrong-tactic pattern measured on
+    T1082, T1016 and T1112.
+
+    DESIGN - three tiers, because rundll32 is not intrinsically suspicious and pretending otherwise
+    would produce a rule with a worse false-positive rate than the noise it replaces:
+
+      100302 (L12) script protocol handlers - vbscript:, javascript:, RunHTMLApplication. No legitimate
+             administrative use whatsoever; this is parser abuse.
+      100300 (L10) the known LOLBAS proxy-execution exports. Real technique, but every one of these has
+             a legitimate caller, so this is a lead rather than a verdict.
+      100301 (L6)  any rundll32 loading a DLL,Export at all. Rundll32 runs constantly on a live desktop,
+             so the level is deliberately low - proportionate to how ordinary the act is.
+
+    ⚠️ PREDICTION: 100300 WILL FIRE IN BOTH CLASSES. The benign mirror uses pcwutl.dll,LaunchApplication
+    and url.dll,FileProtocolHandler - the same two exports as atomics 9 and 15 - because those ARE what
+    the Program Compatibility Wizard and the Windows file-handler do. A rule keyed on the export list
+    therefore cannot separate the classes, and that is the honest result for this technique rather than
+    a defect to engineer around.
+
+    ⚠️ 100302 CANNOT BE EXERCISED BY THIS TEST SET. Atomic 2, the only vbscript: test, was excluded
+    because it never terminates (rundll32 persists as an HTA host until ART's 120s timeout, inflating
+    its window to 193s). The rule is deployed and SMOKE-TESTED MANUALLY OUTSIDE ANY DETONATION WINDOW,
+    so its correctness is demonstrated without contaminating the measurement. Expect 0/0 in both phases,
+    and record that as "not exercised", NOT as "did not fire" - the two mean opposite things and
+    conflating them is how a rule that does not work gets recorded as a rule that found nothing.
+
+    ⚠️ DISPLACEMENT EXPECTED. Sibling rules are evaluated by descending level, so 100301 (L6) outranks
+    92032 (L3) on any rundll32 process that 92032 also matched. Custom-phase counts must be split into
+    relabelled and newly-detected, as for every technique since T1136.001.
+
+    ⚠️ Harness artefact already visible in the baseline: 92027 is attack-only (5/0) because ART's
+    powershell executor spawns a child powershell.exe for atomic 16, while the mirror routes everything
+    through cmd.exe. Same artefact recorded on T1082. Exclude from separability claims.
+    ===================================================================================================
+  -->
+
+  <rule id="100302" level="12">
+    <if_group>sysmon_eid1_detections</if_group>
+    <field name="win.eventdata.originalFileName" type="pcre2">(?i)^RUNDLL32\.EXE$</field>
+    <field name="win.eventdata.commandLine" type="pcre2">(?i)(vbscript:|javascript:|RunHTMLApplication)</field>
+    <description>T1218.011 Rundll32 proxy execution via script protocol handler</description>
+    <mitre>
+      <id>T1218.011</id>
+    </mitre>
+  </rule>
+
+  <rule id="100300" level="10">
+    <if_group>sysmon_eid1_detections</if_group>
+    <field name="win.eventdata.originalFileName" type="pcre2">(?i)^RUNDLL32\.EXE$</field>
+    <field name="win.eventdata.commandLine" type="pcre2">(?i)(pcwutl\.dll,\s*LaunchApplication|url\.dll,\s*(FileProtocolHandler|OpenURL)|zipfldr\.dll,\s*RouteTheCall|shell32\.dll,\s*(Control_RunDLL|ShellExec_RunDLL)|(ie)?advpack\.dll,\s*(LaunchINFSection|RegisterOCX)|(syssetup|setupapi)\.dll,\s*(InstallHinfSection|SetupInfObjectInstallAction)|desk\.cpl,\s*InstallScreenSaver|dfshim\.dll,\s*ShOpenVerbApplication|comsvcs\.dll,\s*MiniDump)</field>
+    <description>T1218.011 Rundll32 proxy execution via known LOLBAS export: $(win.eventdata.commandLine)</description>
+    <mitre>
+      <id>T1218.011</id>
+    </mitre>
+  </rule>
+
+  <rule id="100301" level="6">
+    <if_group>sysmon_eid1_detections</if_group>
+    <field name="win.eventdata.originalFileName" type="pcre2">(?i)^RUNDLL32\.EXE$</field>
+    <field name="win.eventdata.commandLine" type="pcre2">(?i)\.(dll|cpl|ocx|inf)\s*,\s*\S</field>
+    <description>T1218.011 Rundll32 loaded a DLL export: $(win.eventdata.commandLine)</description>
+    <mitre>
+      <id>T1218.011</id>
     </mitre>
   </rule>
 

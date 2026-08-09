@@ -159,7 +159,29 @@ function Invoke-ViaCmd {
     # invocation - the residual path-form difference is intrinsic to ART vs PowerShell and is normalised
     # out at feature-extraction time instead. See export_labelled_alerts.py normalise_cmdline() and
     # RULE_CANONICAL, and BENIGN_ACTIVITY_PROTOCOL.md section 2a.
-    Start-Process -FilePath 'cmd.exe' -ArgumentList "/c $CommandLine" -NoNewWindow -Wait
+    # ⚠️ -PassThru + WaitForExit(ms), NOT -Wait. Changed 2026-08-09 after -Wait deadlocked the
+    # T1218.011 benign phase four times.
+    #
+    # PowerShell's Start-Process -Wait waits on a JOB OBJECT, so it blocks until every DESCENDANT exits,
+    # not just the process it launched. T1218.011's mirror proxies notepad.exe through rundll32:
+    # cmd.exe and rundll32 both exit in milliseconds, notepad stays open, and -Wait sits there until
+    # someone closes the window. No earlier mirror launched a process that outlives its command, so this
+    # never showed up.
+    #
+    # WaitForExit(20000) waits for cmd.exe alone and gives up after 20s. Process lineage is unchanged -
+    # still powershell.exe -> cmd.exe -> child - so the telemetry earlier techniques were measured
+    # against is unaffected. The only behaviour that changes is that a GUI descendant can no longer
+    # wedge the run.
+    #
+    # ⚠️ HOW THIS WAS NEARLY MISSED: I tested the two mirror commands in isolation with
+    # -PassThru + WaitForExit(10000), both returned True, and I concluded the mirror was innocent. But
+    # -PassThru + WaitForExit is precisely the construct that AVOIDS the bug - the test used a different
+    # mechanism from the code under test, so it could not reproduce the fault. A test must exercise the
+    # same call the real code makes, or it proves nothing about it.
+    $p = Start-Process -FilePath 'cmd.exe' -ArgumentList "/c $CommandLine" -NoNewWindow -PassThru
+    if (-not $p.WaitForExit(20000)) {
+        Write-Warning "cmd.exe did not exit within 20s: $CommandLine"
+    }
 }
 
 function Invoke-ViaPowerShell {
@@ -193,8 +215,15 @@ function Invoke-ViaPowerShell {
     #
     # ⚠️ Known limitation: a $CommandLine ending in a backslash would escape the closing quote. None do,
     # and none should - if one ever needs to, append a space.
+    # Same -PassThru + WaitForExit change as Invoke-ViaCmd above, and for the same reason: -Wait blocks
+    # on descendants, so any mirror that leaves a window open would deadlock the phase. Applied here too
+    # rather than only where the fault appeared, because the next mirror to launch a GUI app should not
+    # rediscover this.
     $escaped = $CommandLine -replace '"', '\"'
-    Start-Process -FilePath 'powershell.exe' -ArgumentList '-NoProfile', '-Command', "`"$escaped`"" -NoNewWindow -Wait
+    $p = Start-Process -FilePath 'powershell.exe' -ArgumentList '-NoProfile', '-Command', "`"$escaped`"" -NoNewWindow -PassThru
+    if (-not $p.WaitForExit(20000)) {
+        Write-Warning "powershell.exe did not exit within 20s: $CommandLine"
+    }
 }
 
 $BenignMirror = @{
@@ -347,8 +376,100 @@ $BenignMirror = @{
         Start-Sleep 3
         Invoke-ViaPowerShell 'Set-ItemProperty -Path "HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\Internet Settings\ZoneMap\ProtocolDefaults" -Name http -Value 3; Set-ItemProperty -Path "HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\Internet Settings\ZoneMap\ProtocolDefaults" -Name https -Value 3'
     }
+    # T1218.011 Rundll32. Mirrors the two atomic mechanisms that HAVE a legitimate counterpart, and
+    # deliberately omits the one that does not:
+    #
+    #   atomic 9   rundll32.exe pcwutl.dll,LaunchApplication <exe>   -> mirrored (Program Compatibility
+    #                                                                   Wizard genuinely calls this)
+    #   atomic 15  rundll32.exe url.dll,FileProtocolHandler <target> -> mirrored (this is how Windows
+    #                                                                   opens files and links by handler)
+    #   atomic 2   rundll32 vbscript:"\..\mshtml,RunHTMLApplication  -> NOT mirrored, see below
+    #
+    # Plus shell32.dll,Control_RunDLL desk.cpl, which is what happens whenever anyone opens Display
+    # Settings - the single most ordinary rundll32 invocation on a Windows desktop.
+    #
+    # ⚠️ ATOMIC 2 IS DELIBERATELY NOT MIRRORED, and this is a considered exception to the rule that has
+    # governed every other mirror in this project. Four times now a mechanism omitted from a mirror
+    # produced a fake discriminator (100241, 100251, 100271, 100282) and each was thrown out of the
+    # separability analysis. This one is different: the `vbscript:` protocol handler combined with
+    # `\..\mshtml,RunHTMLApplication` has NO legitimate use. It is a parser-abuse trick, not an
+    # administrative technique, so there is no honest benign counterpart to write. Inventing one would
+    # manufacture a false negative rather than prevent a false discriminator.
+    #
+    # So if a custom rule keyed on the vbscript: pattern comes out attack-only, that is a GENUINE
+    # discriminator and should be reported as one - the same status as T1112's 100260, which separated
+    # the classes because it encoded intent rather than mechanism. The distinction to make in the
+    # write-up: 100241/100251/100271/100282 were attack-only because the MIRROR was too narrow;
+    # a vbscript: rule would be attack-only because the BEHAVIOUR has no benign form. Those are opposite
+    # findings and must not be reported the same way.
+    #
+    # ⚠️ Both classes spawn windowed processes (calc/notepad) that do not exit. Five runs leaves ~15
+    # windows open on a 4 GB endpoint, and host memory pressure has previously distorted window
+    # durations, so kill them after each phase.
+    'T1218.011' = {
+        # ⚠️ WAS shell32.dll,Control_RunDLL desk.cpl until 2026-08-09. That HOSTS the control panel
+        # applet - rundll32 stays alive for as long as the Display Settings window is open - and
+        # Invoke-ViaCmd uses Start-Process -Wait, so the mirror blocked on its first command and the
+        # benign phase never advanced past run 1.
+        #
+        # Exactly the defect that had just excluded atomic 2 (vbscript:/RunHTMLApplication, killed at
+        # ART's 120s timeout). Both are rundll32 invocations that HOST rather than LAUNCH. The lesson was
+        # applied to the attack side and not to the mirror written in the same sitting.
+        #
+        # RULE FOR ANY FUTURE MIRROR: a mirror command must RETURN. Anything that opens a window and
+        # waits - control panel applets, HTA hosts, interactive shells - blocks the whole phase, and it
+        # blocks silently, because a hung run looks identical to a slow one.
+        #
+        # UpdatePerUserSystemParameters is the replacement: a genuinely routine rundll32 call (scripts
+        # invoke it after changing wallpaper or theme settings), same DLL,Export mechanism, returns
+        # immediately, opens no window.
+        # Only the two invocation forms PROVEN to return are used. Both ran five times in the attack
+        # phase with exit code 0 and ~5s windows, so they are known-good; the mirror simply points them
+        # at an unremarkable target.
+        #
+        # Two substitutions were tried and both blocked the phase: shell32.dll,Control_RunDLL desk.cpl
+        # (hosts the applet, waits for the window to close) and user32.dll,UpdatePerUserSystemParameters
+        # (untested when I substituted it - that was the mistake). Guessing a replacement twice cost two
+        # runs. THE RULE: a mirror command must be demonstrated to return before it goes in the mirror,
+        # and the cheapest demonstration is that the attack phase already ran it.
+        #
+        # ⚠️ Consequence for analysis, and it is a real result rather than a compromise: the benign
+        # mirror now uses the SAME two rundll32 export-proxy mechanisms as atomics 9 and 15, differing
+        # only in target. That is honest for this technique - `rundll32 pcwutl.dll,LaunchApplication
+        # <exe>` is precisely what the Program Compatibility Wizard does, and FileProtocolHandler is how
+        # Windows opens files by handler. No rule keyed on the MECHANISM can separate these classes,
+        # which is the finding. A rule would have to key on the TARGET, and the target is attacker-chosen.
+        Invoke-ViaCmd 'rundll32.exe pcwutl.dll,LaunchApplication %windir%\System32\notepad.exe'
+        Start-Sleep 3
+        Invoke-ViaCmd 'rundll32.exe url.dll,FileProtocolHandler notepad.exe'
+    }
     'T1070.004' = { $t = "$env:TEMP\labtest.txt"; "x" | Out-File $t; Invoke-ViaCmd "del `"$t`"" }
-    'T1560.001' = { $s = "$env:TEMP\labzip"; New-Item -ItemType Directory -Path $s -Force | Out-Null; "x" | Out-File "$s\a.txt"; Compress-Archive -Path "$s\a.txt" -DestinationPath "$env:TEMP\lab.zip" -Force; Remove-Item "$env:TEMP\lab.zip","$s" -Recurse -Force }
+    # T1560.001 Archive via Utility. Rewritten 2026-08-09 - the previous version ran Compress-Archive
+    # INLINE in the runner's own process, which produced no child process at all and therefore no
+    # EID 1 telemetry to compare against. Same class of error as the pre-2026-08-06 mirrors that ran
+    # cmdlets inline and left rule 92027 attack-only.
+    #
+    #   atomic 11  makecab.exe <in> <out>        -> mirrored exactly, different files
+    #   (no other atomic is usable - see the exclusions in RULE_ID_REGISTER note 12)
+    #
+    # Compressing a file with makecab is entirely ordinary: it is how Windows itself packages driver
+    # and update payloads, and administrators use it for log bundles.
+    #
+    # ⚠️ ASYMMETRY, DECLARED: the mirror ALSO runs Compress-Archive through a child powershell.exe,
+    # which no atomic in the usable set does. That is deliberate - Compress-Archive is by far the most
+    # common way an administrator archives anything on a modern Windows box, and omitting it would make
+    # the benign class unrepresentative of real administration. Consequence: a rule keyed on
+    # Compress-Archive would be BENIGN-ONLY, the first benign-only artefact in the study. It must be
+    # reported as a mirror-scope artefact in the same category as 100241/100251, not as evidence that
+    # archiving is benign.
+    'T1560.001' = {
+        $src = "$env:TEMP\labarchive"
+        New-Item -ItemType Directory -Path $src -Force | Out-Null
+        "lab archive sample" | Out-File "$src\report.txt"
+        Invoke-ViaCmd "makecab.exe `"$src\report.txt`" `"$env:TEMP\labreport.cab`""
+        Start-Sleep 3
+        Invoke-ViaPowerShell "Compress-Archive -Path '$src\report.txt' -DestinationPath '$env:TEMP\labreport.zip' -Force"
+    }
 }
 
 # --- Preflight -----------------------------------------------------------------
@@ -453,7 +574,24 @@ for ($i = 1; $i -le $Repeat; $i++) {
     }
     else {
         Write-Host "Running legitimate mirror commands as an ordinary admin would..." -ForegroundColor Gray
-        & $BenignMirror[$TechniqueId] | Out-Host
+        # ⚠️ NO `| Out-Host`. It was there until 2026-08-09 and it deadlocked the T1218.011 benign phase
+        # three times before the cause was found.
+        #
+        # Invoke-ViaCmd uses Start-Process -NoNewWindow, so cmd.exe inherits this console's handles - and
+        # so does anything cmd launches. T1218.011's mirror proxies notepad.exe through rundll32, and
+        # notepad STAYS OPEN. Piping the scriptblock into Out-Host makes PowerShell wait for the pipeline
+        # to close, and the pipeline cannot close while an inherited handle is still held. cmd.exe and
+        # rundll32 both exited immediately; PowerShell was blocked on a GUI window.
+        #
+        # Invisible until now because no earlier mirror launched a process that outlives the command.
+        # Out-Host was redundant anyway - Write-Host output reaches the console without it.
+        #
+        # ⚠️ METHOD NOTE. Two wrong fixes were tried first, both by reasoning about which rundll32
+        # invocations "ought" to return, and both cost a 13-minute run. The commands were then tested in
+        # isolation with Start-Process -PassThru and WaitForExit(10000) - a call that cannot hang - and
+        # BOTH returned True, which is what proved the mirror was innocent and sent the search here.
+        # When something hangs, bisect it with a timeout instead of substituting parts of it.
+        & $BenignMirror[$TechniqueId]
         $context = "interactive-admin"
     }
 

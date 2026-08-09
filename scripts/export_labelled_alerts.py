@@ -167,6 +167,30 @@ OS_BACKGROUND_ARTEFACTS = (
     re.compile(r"\\Windows\\WinSxS\\Temp\\", re.I),                      # servicing stack scratch space
 )
 
+# Fourth artefact class, found 2026-08-09 on T1218.011, and the first one this project CREATED.
+#
+# Widening the Sysmon config for T1112's third phase added `Internet Settings\ZoneMap\` to the registry
+# include-list. Windows rewrites four scalar values under that key as routine housekeeping, and custom
+# rule 100262's original path regex matched anywhere under ZoneMap, so every one of them alerted:
+#
+#     98  ZoneMap\ProxyBypass        98  ZoneMap\IntranetName
+#     98  ZoneMap\UNCAsIntranet      98  ZoneMap\AutoDetect
+#     11  ZoneMap\ProtocolDefaults\http    11  ZoneMap\ProtocolDefaults\https   <- the real signal
+#
+# 392 of 414 alerts were noise. It swamped T1218.011 with 88 attack / 108 benign - four times every
+# other rule in that technique combined - and inflated T1112's own 100262 figure from a true 10/10 to a
+# recorded 18/10, the extra 8 being attack-only purely by timing.
+#
+# ⚠️ SELF-INFLICTED TWICE: the events exist only because we widened the sensor, and they alerted only
+# because our own rule was imprecise. The rule is now narrowed to ProtocolDefaults / Domains / Zones,
+# but a rule change is NOT retroactive - alerts already in alerts.json keep rule id 100262 - so this
+# filter is what makes re-exports of the historical data agree with the corrected ruleset.
+#
+# ⚠️ Scoped to the four housekeeping VALUES, not to ZoneMap and not to rule 100262. Adding a site to
+# Domains, or changing a per-zone security setting, is genuinely T1112 and must stay visible.
+ZONEMAP_HOUSEKEEPING = re.compile(
+    r"\\Internet Settings\\ZoneMap\\(ProxyBypass|IntranetName|UNCAsIntranet|AutoDetect)$", re.I)
+
 
 # =====================================================================================================
 # ⚠️ alerts.json ROTATES DAILY. Wazuh moves the previous day's alerts into
@@ -320,6 +344,10 @@ def classify_exclusion(alert):
         for field in (target, eventdata.get("imageLoaded") or "", eventdata.get("targetObject") or ""):
             if field and any(p.search(field.replace("\\\\", "\\")) for p in OS_BACKGROUND_ARTEFACTS):
                 return "os-background:windows-update"
+
+    target_object = eventdata.get("targetObject") or ""
+    if target_object and ZONEMAP_HOUSEKEEPING.search(target_object.replace("\\\\", "\\")):
+        return "os-background:zonemap-housekeeping"
 
     return None
 
