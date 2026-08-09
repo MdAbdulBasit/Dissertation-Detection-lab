@@ -10,6 +10,7 @@ technique_id,ruleset_phase,class,rule_id,count
 -,-,unlabelled,92213,84
 -,-,unlabelled,100200,64
 -,-,unlabelled,61104,58
+-,-,unlabelled,92031,57
 -,-,unlabelled,60608,56
 -,-,unlabelled,92036,50
 -,-,unlabelled,92200,45
@@ -26,6 +27,7 @@ technique_id,ruleset_phase,class,rule_id,count
 -,-,unlabelled,60775,17
 -,-,unlabelled,60805,16
 -,-,unlabelled,100271,16
+-,-,unlabelled,92039,16
 -,-,unlabelled,60807,15
 -,-,unlabelled,60809,15
 -,-,unlabelled,503,14
@@ -102,6 +104,7 @@ T1003.001,custom-sensor,benign,100320,5
 T1016,baseline,attack,92032,23
 T1016,baseline,attack,92052,15
 T1016,baseline,attack,92036,5
+T1016,baseline,attack,92031,5
 T1016,baseline,attack,92004,1
 T1016,baseline,benign,92032,12
 T1016,baseline,benign,92004,4
@@ -118,6 +121,7 @@ T1033,baseline,attack,92022,19
 T1033,baseline,attack,92027,15
 T1033,baseline,attack,92052,10
 T1033,baseline,attack,92036,5
+T1033,baseline,attack,92031,5
 T1033,baseline,attack,61104,4
 T1033,baseline,attack,60608,3
 T1033,baseline,benign,92032,10
@@ -130,6 +134,7 @@ T1033,custom,attack,100241,10
 T1033,custom,attack,100240,5
 T1033,custom,attack,92027,5
 T1033,custom,attack,92036,5
+T1033,custom,attack,92031,5
 T1033,custom,attack,61104,1
 T1033,custom,attack,60642,1
 T1033,custom,benign,100240,10
@@ -217,6 +222,7 @@ T1082,custom,benign,100231,4
 T1082,custom,benign,100232,4
 T1082,custom,benign,100233,4
 T1082,custom,benign,60702,1
+T1087.001,baseline,attack,92031,25
 T1087.001,baseline,attack,92036,15
 T1087.001,baseline,attack,92052,10
 T1087.001,baseline,attack,92032,10
@@ -224,6 +230,7 @@ T1087.001,baseline,attack,92033,10
 T1087.001,baseline,attack,100241,5
 T1087.001,baseline,attack,100291,1
 T1087.001,baseline,benign,92036,10
+T1087.001,baseline,benign,92031,10
 T1087.001,baseline,benign,92004,5
 T1087.001,custom,attack,100200,25
 T1087.001,custom,attack,92052,10
@@ -278,14 +285,17 @@ T1136.001,baseline,attack,60110,25
 T1136.001,baseline,attack,92036,15
 T1136.001,baseline,attack,60154,15
 T1136.001,baseline,attack,92052,10
+T1136.001,baseline,attack,92040,10
 T1136.001,baseline,attack,60170,10
 T1136.001,baseline,attack,92027,6
+T1136.001,baseline,attack,92031,5
 T1136.001,baseline,attack,100200,5
 T1136.001,baseline,attack,60111,5
 T1136.001,baseline,benign,60160,13
 T1136.001,baseline,benign,60170,12
 T1136.001,baseline,benign,60109,10
 T1136.001,baseline,benign,92036,10
+T1136.001,baseline,benign,92039,10
 T1136.001,baseline,benign,60111,8
 T1136.001,baseline,benign,60110,5
 T1136.001,baseline,benign,92004,5
@@ -302,7 +312,9 @@ T1136.001,custom,attack,100281,10
 T1136.001,custom,attack,92036,7
 T1136.001,custom,attack,100200,6
 T1136.001,custom,attack,100282,5
+T1136.001,custom,attack,92031,5
 T1136.001,custom,attack,60111,5
+T1136.001,custom,attack,92039,2
 T1136.001,custom,attack,92027,2
 T1136.001,custom,benign,100283,20
 T1136.001,custom,benign,100280,10
@@ -311,6 +323,7 @@ T1136.001,custom,benign,60111,5
 T1136.001,custom,benign,92004,4
 T1136.001,custom,benign,100281,4
 T1136.001,custom,benign,92036,4
+T1136.001,custom,benign,92039,4
 T1218.011,baseline,attack,92052,10
 T1218.011,baseline,attack,92032,10
 T1218.011,baseline,attack,92027,5

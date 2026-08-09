@@ -619,9 +619,7 @@ def main():
 
             eventdata = dig(alert, "data", "win", "eventdata", default={}) or {}
             image = basename_lower(eventdata.get("image"))
-            if not args.keep_net1 and image == "net1.exe":
-                net1_dropped += 1
-                continue
+            # ⚠️ net1.exe alerts are NO LONGER dropped here. See the deduplication pass after this loop.
 
             match = next((w for w in windows if w["label_from"] <= ts <= w["label_to"]), None)
 
@@ -654,10 +652,64 @@ def main():
                 "event_type": eventdata.get("eventType", ""),
             })
 
-            key = (match["technique_id"] if match else "-",
-                   match["ruleset_phase"] if match else "-",
-                   match["type"] if match else "unlabelled")
-            summary[key][rule_id] += 1
+    # =================================================================================================
+    # net.exe -> net1.exe DEDUPLICATION, rewritten 2026-08-09.
+    #
+    # The old version dropped EVERY alert whose image was net1.exe, unconditionally, inside the read
+    # loop. That is not deduplication - it is deletion by image, and it silently removed any rule that
+    # fires ONLY on the net1 child.
+    #
+    # It removed one outright. Rule 92039 "A net.exe account discovery command was initiated" fired 32
+    # times across the dataset, every single one with image=net1.exe, and therefore never appeared in
+    # labelled_alerts.csv at all - while being plainly visible in the raw alerts.json. That discrepancy
+    # sat in the register as an open question ("92039 fired in the logs but not in the export") for a
+    # day. It was not a mystery about 92039; it was this filter.
+    #
+    # 92039 matters: it is the vendor rule that calls `net user X /add` and `net user X /delete`
+    # ACCOUNT DISCOVERY - the same defect this project found and fixed twice in its own rule 100200.
+    # The evidence that the error is structural rather than mine was being deleted before it reached
+    # the dataset.
+    #
+    # Correct behaviour: drop a net1.exe alert only when an EQUIVALENT net.exe alert exists - same rule
+    # id, same normalised command line, same class. That removes the genuine 2x inflation (net.exe and
+    # net1.exe both matching the same rule with identical arguments) while preserving any rule that only
+    # the child triggers.
+    #
+    # GENERAL LESSON, and the third instance of it today: a filter written to remove noise must be
+    # scoped to the noise, not to a property the noise happens to share with signal. Same error as
+    # rule 100262 matching all of ZoneMap and 100313 matching all of Prefetch.
+    # =================================================================================================
+    # ⚠️ Key on the ARGUMENTS, not the whole command line. First attempt used
+    # command_line_normalised in full and deduplicated ZERO rows, because the two processes never share
+    # a command line: net.exe runs as `net user ...` while its child runs as
+    # `C:\Windows\system32\net1 user ...`. The binary token differs by definition - that is what makes
+    # them parent and child - so any key containing it can never match. Kept alerts jumped 4,636 to
+    # 5,130 and the 2x inflation the filter exists to remove came straight back.
+    # Dropping the first whitespace-delimited token leaves `user LabBenignSvc /add` on both sides.
+    def _args_only(cmdline):
+        parts = (cmdline or "").strip().split(None, 1)
+        return parts[1].strip().lower() if len(parts) > 1 else ""
+
+    net1_dropped = 0
+    if not args.keep_net1:
+        parent_keys = {
+            (r["rule_id"], _args_only(r["command_line_normalised"]), r["class"], r["session_id"])
+            for r in rows
+            if basename_lower(r["image"]) == "net.exe"
+        }
+        kept = []
+        for r in rows:
+            if (basename_lower(r["image"]) == "net1.exe"
+                    and (r["rule_id"], _args_only(r["command_line_normalised"]),
+                         r["class"], r["session_id"]) in parent_keys):
+                net1_dropped += 1
+                continue
+            kept.append(r)
+        rows = kept
+
+    # Summary is built AFTER deduplication so the counts written to alert_counts.csv match the dataset.
+    for r in rows:
+        summary[(r["technique_id"] or "-", r["ruleset_phase"] or "-", r["class"])][r["rule_id"]] += 1
 
     with open(args.out_dataset, "w", newline="", encoding="utf-8") as fh:
         w = csv.DictWriter(fh, fieldnames=list(rows[0].keys()) if rows else ["timestamp"])
@@ -681,7 +733,8 @@ def main():
             print(f"  {n:6d}  {reason}")
         print(f"  {sum(excluded.values()):6d}  TOTAL EXCLUDED")
     if net1_dropped:
-        print(f"  {net1_dropped:6d}  net1.exe duplicates (net.exe spawns it with identical arguments)")
+        print(f"  {net1_dropped:6d}  net1.exe duplicates (matched a net.exe alert with the same rule "
+              f"and command line; net1-only rules such as 92039 are now KEPT)")
 
     labelled = sum(1 for r in rows if r["label"] == 1)
     print(f"\nKept {len(rows)} alerts: {labelled} labelled 1 (in a window), {len(rows) - labelled} labelled 0")
