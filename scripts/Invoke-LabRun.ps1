@@ -491,6 +491,31 @@ $BenignMirror = @{
     # protected process and could destabilise the endpoint. The dump file is removed each run so the 4 GB
     # VM does not accumulate multi-hundred-MB dumps - lsass dumps alone are ~50 MB and five runs of both
     # phases would be gigabytes on a host that has already hit zero free space once.
+    # T1105 Ingress Tool Transfer. Mirrors two of the three atomic mechanisms with the SAME binaries and
+    # the same verbs, pointed at a benign URL:
+    #
+    #   atomic 18  curl.exe -o <file> <url>          -> mirrored
+    #   atomic 10  PowerShell web download           -> mirrored
+    #   atomic 7   certutil -urlcache -f -split      -> NOT mirrored, see below
+    #
+    # Target is Microsoft's own connectivity-test endpoint: tiny, always reachable, and something Windows
+    # itself requests constantly, so a benign download to it is entirely unremarkable.
+    #
+    # ⚠️ certutil IS DELIBERATELY NOT MIRRORED. `certutil -urlcache -f -split` is a documented LOLBIN
+    # download primitive with no realistic administrative use - certutil's legitimate role is certificate
+    # handling, not file transfer. Same reasoning as T1218.011's vbscript: handler and T1070.004's
+    # Prefetch deletion: inventing a benign counterpart would manufacture a false negative. So a rule
+    # keyed on certutil-as-downloader coming out attack-only is a GENUINE discriminator (the 100260
+    # category), not a mirror-scope artefact (the 100241 category).
+    #
+    # ⚠️ Both commands are known to return - curl and Invoke-WebRequest exit when the transfer completes.
+    # No GUI child, so the Start-Process -Wait job-object deadlock that cost four runs on T1218.011
+    # cannot recur here.
+    'T1105' = {
+        Invoke-ViaCmd 'curl.exe -s -o "%TEMP%\labfetch-curl.txt" http://www.msftconnecttest.com/connecttest.txt'
+        Start-Sleep 3
+        Invoke-ViaPowerShell 'Invoke-WebRequest -Uri "http://www.msftconnecttest.com/connecttest.txt" -OutFile "$env:TEMP\labfetch-iwr.txt" -UseBasicParsing'
+    }
     'T1003.001' = {
         Invoke-ViaPowerShell 'Start-Process notepad.exe -WindowStyle Minimized; Start-Sleep 3; $p=(Get-Process notepad | Select-Object -First 1).Id; C:\Windows\System32\rundll32.exe C:\Windows\System32\comsvcs.dll, MiniDump $p "$env:TEMP\notepad-comsvcs.dmp" full; Start-Sleep 2; Remove-Item "$env:TEMP\notepad-comsvcs.dmp" -Force -ErrorAction SilentlyContinue; Stop-Process -Name notepad -Force -ErrorAction SilentlyContinue'
     }
