@@ -191,6 +191,27 @@ OS_BACKGROUND_ARTEFACTS = (
 ZONEMAP_HOUSEKEEPING = re.compile(
     r"\\Internet Settings\\ZoneMap\\(ProxyBypass|IntranetName|UNCAsIntranet|AutoDetect)$", re.I)
 
+# Fifth artefact class, found 2026-08-09 on T1003.001 - a technique with nothing to do with file deletion.
+#
+# Enabling FileDeleteDetected for T1070.004 exposed Windows Prefetch maintenance: svchost.exe deletes
+# C:\Windows\Prefetch\*.pf continuously (POWERSHELL.EXE-920BBA2A.pf, WMIPRVSE.EXE, CMD.EXE, CONHOST.EXE,
+# TRUSTEDINSTALLER.EXE and so on). Custom rule 100313 matched all of it: 33 attack / 15 benign inside
+# T1003.001's windows, 100% ambient.
+#
+# ⚠️ AND THE FIRST FIX MADE IT WORSE IN AN INSTRUCTIVE WAY. Negating svchost.exe on 100313 (level 10)
+# stopped those events matching there, and they fell through to 100312 (level 8), the catch-all with no
+# image condition - 38 attack / 23 benign. The noise RE-TIERED rather than disappearing. In a tiered rule
+# set an exclusion must be applied at every tier that can match, or upstream of all of them. Both rules
+# now carry the negation AND this filter exists so historical re-exports agree with the corrected ruleset.
+#
+# ⚠️ Scoped to svchost.exe deleting under \Windows\Prefetch\ specifically. Prefetch deletion by ANY OTHER
+# process stays visible - that is atomic T1070.004-9, and clearing prefetch is genuine indicator removal.
+#
+# Third self-inflicted noise source after ZoneMap (392 alerts) and this one's own first fix. All three
+# share a root cause: matching a LOCATION the operating system also writes to, without asking who else
+# touches it.
+PREFETCH_HOUSEKEEPING = re.compile(r"\\Windows\\Prefetch\\.*\.pf$", re.I)
+
 
 # =====================================================================================================
 # ⚠️ alerts.json ROTATES DAILY. Wazuh moves the previous day's alerts into
@@ -348,6 +369,11 @@ def classify_exclusion(alert):
     target_object = eventdata.get("targetObject") or ""
     if target_object and ZONEMAP_HOUSEKEEPING.search(target_object.replace("\\\\", "\\")):
         return "os-background:zonemap-housekeeping"
+
+    # Windows Prefetch maintenance. Only when svchost.exe is the deleter - prefetch deletion by anything
+    # else is atomic T1070.004-9 and is genuine indicator removal.
+    if image == "svchost.exe" and target and PREFETCH_HOUSEKEEPING.search(target.replace("\\\\", "\\")):
+        return "os-background:prefetch-housekeeping"
 
     return None
 

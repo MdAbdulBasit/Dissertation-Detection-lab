@@ -64,6 +64,10 @@ param(
     # expires and before the next window opens - so the deletion telemetry is attributed to no window.
     # This forces a gap wider than the buffer, so 45-90s gaps cannot be used with it.
     [switch]$CleanupBetweenRuns,
+    # Re-run -GetPrereqs before every attack window. Needed when the atomic CONSUMES its target, i.e.
+    # deletion techniques: without it, run 1 deletes the artefact and runs 2-5 measure a failed deletion.
+    # Distinct from -CleanupBetweenRuns, which REMOVES an artefact the atomic created.
+    [switch]$PrereqsEachRun,
     # 'custom-sensor' added 2026-08-08 for T1112, the first technique whose gap CANNOT be closed by a
     # rule. Sysmon's own config filters which registry keys emit EID 13: 400 EID 13 events in a sample,
     # 81 of them Run-key writes, and ZERO for HKCU\...\Policies\...\PowerShell or Internet Settings. So
@@ -443,7 +447,63 @@ $BenignMirror = @{
         Start-Sleep 3
         Invoke-ViaCmd 'rundll32.exe url.dll,FileProtocolHandler notepad.exe'
     }
-    'T1070.004' = { $t = "$env:TEMP\labtest.txt"; "x" | Out-File $t; Invoke-ViaCmd "del `"$t`"" }
+    # T1070.004 Indicator Removal: File Deletion. Rewritten 2026-08-09.
+    #
+    # The old version wrote labtest.TXT and deleted it. Two defects: .txt is not in the FileDeleteDetected
+    # include list (which is scoped to executables, scripts and forensic artefacts), so the deletion would
+    # have been invisible to the sensor and the mirror would have looked like a detection gap; and it
+    # covered only the cmd path, not PowerShell.
+    #
+    #   atomic 4  del /f <file>              -> mirrored with cmd del on a .bat
+    #   atomic 7  Remove-Item -Recurse <dir>  -> mirrored with Remove-Item on a folder of .bat files
+    #   atomic 9  del of a Prefetch file      -> NOT mirrored, see below
+    #
+    # Deleting leftover scripts and build folders is one of the most ordinary things an administrator
+    # does, so both of these have honest benign counterparts.
+    #
+    # ⚠️ ASYMMETRY DECLARED, and it is unavoidable with the current runner. The ATTACK side re-creates its
+    # targets via -PrereqsEachRun BEFORE the window opens, so attack windows contain a deletion and no
+    # creation. The mirror has to create its own targets INSIDE the window, so benign windows contain
+    # both. Consequence: EID 11 FileCreate for .bat files will be benign-only. That is a harness
+    # artefact of window placement, not a behavioural difference, and must be excluded from separability
+    # claims - the same treatment as 92070/92071's WMI lineage on T1059.001.
+    #
+    # ⚠️ Atomic 9 deletes a Windows Prefetch file, which has no legitimate administrative counterpart -
+    # nobody clears individual prefetch entries by hand. Not mirrored for the same reason T1218.011's
+    # vbscript: handler was not: inventing a benign version would manufacture a false negative. A rule
+    # keyed on Prefetch deletion that comes out attack-only is a GENUINE discriminator (the 100260
+    # category), not a mirror-scope artefact (the 100241 category).
+    # T1003.001 LSASS Memory. The mirror is the sharpest pairing in the whole project: it runs the
+    # IDENTICAL command as atomic 2 - rundll32.exe comsvcs.dll, MiniDump <pid> <path> full - against a
+    # different process. Same binary, same DLL, same export, same arguments; only the target PID differs.
+    #
+    # This is genuinely what a support engineer does when asked to capture a hung application's memory,
+    # and comsvcs MiniDump is a documented way to do it without installing ProcDump.
+    #
+    # ⚠️ CONSEQUENCE, PREDICTED BEFORE RUNNING: a rule keyed on the MECHANISM (rundll32 + comsvcs +
+    # MiniDump - which is what custom rule 100300 already matches from the T1218.011 work) must fire in
+    # BOTH classes. A rule keyed on the TARGET being lsass.exe - which is what vendor rule 92900 does -
+    # fires in attack only. That is the intent-versus-mechanism contrast again, and here it is exact,
+    # because unlike T1112's HideFileExt pairing the two command lines are character-identical apart from
+    # the PID.
+    #
+    # ⚠️ Dumps notepad rather than a system process on purpose: dumping a service would need SeDebug on a
+    # protected process and could destabilise the endpoint. The dump file is removed each run so the 4 GB
+    # VM does not accumulate multi-hundred-MB dumps - lsass dumps alone are ~50 MB and five runs of both
+    # phases would be gigabytes on a host that has already hit zero free space once.
+    'T1003.001' = {
+        Invoke-ViaPowerShell 'Start-Process notepad.exe -WindowStyle Minimized; Start-Sleep 3; $p=(Get-Process notepad | Select-Object -First 1).Id; C:\Windows\System32\rundll32.exe C:\Windows\System32\comsvcs.dll, MiniDump $p "$env:TEMP\notepad-comsvcs.dmp" full; Start-Sleep 2; Remove-Item "$env:TEMP\notepad-comsvcs.dmp" -Force -ErrorAction SilentlyContinue; Stop-Process -Name notepad -Force -ErrorAction SilentlyContinue'
+    }
+    'T1070.004' = {
+        $d = "$env:TEMP\labcleanup"
+        New-Item -ItemType Directory -Path $d -Force | Out-Null
+        "rem lab" | Out-File "$d\installer.bat" -Encoding ascii
+        "rem lab" | Out-File "$env:TEMP\labstale.bat" -Encoding ascii
+        Start-Sleep 3
+        Invoke-ViaCmd "del /f `"$env:TEMP\labstale.bat`""
+        Start-Sleep 3
+        Invoke-ViaPowerShell "Remove-Item -Path '$d' -Recurse -Force"
+    }
     # T1560.001 Archive via Utility. Rewritten 2026-08-09 - the previous version ran Compress-Archive
     # INLINE in the runner's own process, which produced no child process at all and therefore no
     # EID 1 telemetry to compare against. Same class of error as the pre-2026-08-06 mirrors that ran
@@ -564,6 +624,21 @@ for ($i = 1; $i -le $Repeat; $i++) {
     # ahead of their own windows during BST.
     $sessionId = "$((Get-Date).ToUniversalTime().ToString('yyyyMMdd-HHmmss'))-$Type-r$i"
     Write-Host "`n=== $Type : $TechniqueId  (run $i of $Repeat) ===" -ForegroundColor Cyan
+
+    # ⚠️ Prereqs are re-created BEFORE the window opens, deliberately. Added 2026-08-09 for T1070.004,
+    # whose atomics DELETE a file and a folder that only exist because -GetPrereqs created them: run 1
+    # consumes the target and runs 2-5 would delete nothing, measuring failure four times. Same collision
+    # class as T1053.005's named scheduled tasks and T1547.001's REG ADD without /F - the third variant,
+    # and the first where the artefact is CONSUMED rather than blocked.
+    #
+    # Placed before $start so the file-creation telemetry lands OUTSIDE the labelled window. Putting it
+    # after would mean every attack window contained a create-then-delete pair, and the create is not
+    # part of the technique.
+    if ($PrereqsEachRun -and $Type -eq 'attack') {
+        Write-Host "Re-creating prereqs before window opens..." -ForegroundColor DarkGray
+        Invoke-AtomicTest $TechniqueId -TestNumbers $TestNumberList -GetPrereqs | Out-Null
+        Start-Sleep 5
+    }
 
     $start = Get-UtcStamp
     Write-Host "WINDOW START (UTC): $start" -ForegroundColor Yellow

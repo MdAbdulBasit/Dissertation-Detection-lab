@@ -552,6 +552,38 @@ Sysmon/SCA behaviour the same way. For every new rule, inspect the parent proces
 firings before accepting them as detections — a rule that appears to work may only be detecting the
 monitoring stack.
 
+## ⚠️ Every export has FOUR steps, not two — added 2026-08-09 after finding this twice in one day
+
+```
+1. scp detonation_log.csv          host -> Blue
+2. run export_labelled_alerts.py   on Blue
+3. scp labelled_alerts.csv         Blue -> host      <-- SKIPPED TWICE
+4. scp alert_counts.csv            Blue -> host      <-- SKIPPED TWICE
+```
+
+Steps 3 and 4 are the ones that get forgotten, because steps 1 and 2 produce visible output and the
+technique *looks* finished. The consequence found on 2026-08-09: the repo's `labelled_alerts.csv` was
+missing **all of T1112's three phases, T1218.011, T1560.001 and T1070.004** at various points, while the
+window log was fully up to date — so the committed dataset silently disagreed with the committed results
+table. Both times it was found by deliberately auditing the export, not by anything failing.
+
+**Assertion to run before any commit that touches results:**
+
+```bash
+python3 - <<'PY'
+import csv
+w = [r['window_end'] for r in csv.DictReader(open('data/detonation_log.csv', encoding='utf-8-sig'))
+     if not (r['notes'] or '').strip().upper().startswith('SUPERSEDED')]
+a = [r['timestamp'] for r in csv.DictReader(open('data/labelled_alerts.csv')) if r.get('timestamp')]
+print('newest window :', max(w))
+print('newest alert  :', max(a)[:19].replace('T', ' '))
+print('OK' if max(a)[:10] >= max(w)[:10] else 'STALE - re-run steps 3 and 4')
+PY
+```
+
+If the newest alert predates the newest window, the dataset is stale and any figure quoted from it is
+a figure from a previous technique.
+
 ## Export-time checklist
 
 1. Filter to `agent.name = win-endpoint`

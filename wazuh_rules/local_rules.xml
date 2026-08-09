@@ -787,4 +787,312 @@
     </mitre>
   </rule>
 
+  <!--
+    ===================================================================================================
+    T1560.001 Archive Collected Data: Archive via Utility
+    Custom rule IDs 100330-100332 | levels 8-12
+
+    MEASURED BASELINE (2026-08-09, 5+5 windows, atomic 11, 10 attack / 16 benign):
+    ZERO T1560.001 attribution. Every default rule claiming T1560 - 91825 (Compress-7Zip), 91826
+    (Copy-Item), 91827, 91846 (::CreateFromDirectory) - chains from 91802, PowerShell SCRIPT BLOCK
+    LOGGING (EID 4104), and EnableScriptBlockLogging is unset on this endpoint. Verified by query during
+    T1112, not assumed. Nothing else in the ruleset maps to T1560.
+
+    This is the T1112 sensor wall reached by a different route: not a Sysmon filter, but a WINDOWS
+    LOGGING FEATURE THAT IS OFF BY DEFAULT.
+
+    ⚠️ AND THE TWO TECHNIQUES CHAIN. T1112's atomic 33 writes
+    HKCU\Software\Policies\Microsoft\Windows\PowerShell\ScriptBlockLogging\EnableScriptBlockLogging = 0.
+    An adversary who performs Modify Registry first DISABLES the only detection Wazuh has for Archive via
+    Utility. That is a measured dependency between two techniques in this very test set, not a
+    hypothetical - and it is the strongest argument in the study for detecting on process telemetry
+    rather than on an optional logging channel an attacker can switch off.
+
+    What fired instead: 92032 (T1087 + T1059.003) and 92052 (T1059.003) in attack; 92032, 92004 and
+    92027 in benign. Collection read as Execution and Account Discovery.
+
+    ⚠️ ONLY 1 OF 12 ATOMICS IS USABLE and that is itself reportable. Tests 1-4 need rar/winrar/winzip/
+    7zip installed; test 10 targets ESXi; test 12 copies the ENTIRE AppData tree and zips it, which on a
+    4 GB endpoint balloons the window past comparability. That leaves makecab.exe - the only built-in
+    Windows archiver in ART's set. On a clean Windows host this technique reduces to makecab and tar, and
+    NEITHER appears anywhere in the default ruleset.
+
+    DESIGN - detect on the ARCHIVER PROCESS, not on a script-logging channel:
+
+      100330 (L8)  built-in archive utilities: makecab, tar, compact, expand, wbadmin. Level 8 because
+             compressing files is ordinary administration; this is a lead, not a verdict.
+      100331 (L8)  PowerShell archiving via command line - Compress-Archive, ZipFile::CreateFromDirectory,
+             Compress-7Zip. Reads win.eventdata.commandLine on EID 1, so it works WITHOUT script block
+             logging. That is the point: it covers the same behaviour 91826/91846 cover, over a channel
+             the adversary cannot switch off from userland.
+      100332 (L12) an archiver whose command line references CREDENTIAL MATERIAL - SAM/SECURITY/SYSTEM
+             hives, ntds.dit, browser credential stores. Archiving files is ordinary; archiving the
+             credential store is not.
+
+    ⚠️ PREDICTED CLASS BEHAVIOUR, recorded before the custom phase:
+      100330 SHOULD FIRE IN BOTH CLASSES - both the atomic and the mirror run makecab.
+      100331 WILL BE BENIGN-ONLY, and that is a DECLARED MIRROR-SCOPE ARTEFACT, not a result: no usable
+             atomic uses Compress-Archive, while the mirror does because Compress-Archive is how
+             administrators actually archive things on modern Windows. First benign-only artefact in the
+             study - the mirror image of 100241/100251/100271/100282, and it must be excluded from
+             separability claims for the same reason they were.
+      100332 SHOULD BE ATTACK-ONLY, and unlike 100331 that is a GENUINE discriminator of the 100260 kind,
+             because it encodes intent (what is being archived) rather than mechanism (that archiving
+             happened). ⚠️ CAVEAT TO STATE PLAINLY: the atomic's input file is literally named
+             C:\Temp\sam.hiv because Atomic Red Team chose that name, so the match is partly an artefact
+             of the test data. The rule is right in principle; the evidence for it here is weaker than
+             100260's, where the atomic and mirror wrote the SAME key in opposite directions.
+
+    ⚠️⚠️ AND 100330 WILL APPEAR BENIGN-ONLY WITHOUT BEING SO. Found in the dry-run, before the phase.
+    100332 (L12) outranks 100330 (L8), and the atomic's input file is C:\Temp\sam.hiv, so the ATTACK side
+    matches 100332 while the mirror's makecab (report.txt) falls through to 100330. Read naively the
+    export will show 100330 as 0 attack / 5 benign - which would be a completely false conclusion, since
+    BOTH classes run makecab.exe.
+    FOR THE MECHANISM COMPARISON, SUM 100330 + 100332: that gives 5 / 5, perfectly balanced, and is the
+    honest answer to "can a rule keyed on the archiver separate the classes?" - no. The split between the
+    two rules is severity tiering by TARGET, exactly as 100290/100291 tier T1547.001 by payload. Reporting
+    the two rules separately as class-exclusive would invent a discriminator out of our own level
+    ordering. This is the third distinct way a rule can look class-exclusive without being so - after
+    mirror scope (100241) and harness lineage (92070/92071) - and it is the least obvious of the three,
+    because nothing about the data is wrong; only the grouping is.
+    ===================================================================================================
+  -->
+
+  <rule id="100332" level="12">
+    <if_group>sysmon_eid1_detections</if_group>
+    <field name="win.eventdata.originalFileName" type="pcre2">(?i)^(makecab|tar|compact|expand|wbadmin|powershell|pwsh)(\.exe)?$</field>
+    <field name="win.eventdata.commandLine" type="pcre2">(?i)(\\config\\(sam|security|system)\b|\bsam\.hiv\b|\bntds\.dit\b|\\Login Data\b|\blogins\.json\b|\\Local State\b|\bcredentials\b)</field>
+    <description>T1560.001 Archive utility targeting credential material: $(win.eventdata.commandLine)</description>
+    <mitre>
+      <id>T1560.001</id>
+      <id>T1003</id>
+    </mitre>
+  </rule>
+
+  <rule id="100330" level="8">
+    <if_group>sysmon_eid1_detections</if_group>
+    <field name="win.eventdata.originalFileName" type="pcre2">(?i)^(makecab|tar|compact|expand|wbadmin)(\.exe)?$</field>
+    <description>T1560.001 Data archived using built-in utility $(win.eventdata.originalFileName)</description>
+    <mitre>
+      <id>T1560.001</id>
+    </mitre>
+  </rule>
+
+  <!-- Reads the EID 1 command line, so it detects the same behaviour as 91826/91846 WITHOUT needing
+       Script Block Logging - the channel T1112 can switch off from userland. -->
+  <rule id="100331" level="8">
+    <if_group>sysmon_eid1_detections</if_group>
+    <field name="win.eventdata.originalFileName" type="pcre2">(?i)^powershell(\.exe)?$</field>
+    <field name="win.eventdata.commandLine" type="pcre2">(?i)(Compress-Archive|ZipFile\]?::CreateFromDirectory|Compress-7Zip|System\.IO\.Compression)</field>
+    <description>T1560.001 Data archived via PowerShell compression: $(win.eventdata.commandLine)</description>
+    <mitre>
+      <id>T1560.001</id>
+    </mitre>
+  </rule>
+
+  <!--
+    ===================================================================================================
+    T1070.004 Indicator Removal on Host: File Deletion
+    Custom rule IDs 100310-100313 | levels 8-10
+
+    MEASURED BASELINE (2026-08-09, 5+5 windows, atomics 4/7/9, 33 attack / 20 benign):
+    ZERO T1070.004 attribution. THREE independent layers each fail to see a file deletion:
+
+      (a) FIM. Rule 553 "File deleted." reads syscheck, which watches only the agent's <directories>
+          list: %WINDIR% restricted to regedit.exe/system.ini/win.ini, %WINDIR%\SysNative restricted to
+          a fixed binary list, drivers\etc, and wbem restricted to WMIC.exe. NO USER PATHS AT ALL, on a
+          43200s (12 hour) scan. Same latent-coverage shape as T1112.
+      (b) SENSOR. FileDelete is absent from the endpoint's sysmonconfig.xml entirely, so EID 23 and 26
+          are never generated.
+      (c) RULESET. Even with the sensor enabled, base rule 61654 (group sysmon_event_26) is LEVEL 0 and
+          has NO CHILD RULES, so Wazuh emits nothing for a file deletion regardless.
+    Rule 60117 covers event 1102, audit log cleared - that is T1070.001, not .004. Rules 80106 and 80791
+    are Netscaler and Linux auditd.
+
+    What fired instead: 92027 (T1059.001) 19/5, 92052 (T1059.003) 8/0, 92004 (T1059.003) 6/5.
+    Defense Evasion read as Execution for the fourth time, after T1082, T1016 and T1112.
+
+    ⚠️ AND THE HIGHEST-SEVERITY ALERT IN THE TECHNIQUE FIRES ONLY ON BENIGN ACTIVITY. 92213 - level 15,
+    the top of Wazuh's scale, mapped T1105 - fired 10 times in the BENIGN class and ZERO times in attack,
+    on the mirror's .bat files being written to Temp. Part of that is the declared window-placement
+    asymmetry (the attack side creates its targets before the window opens, the mirror inside it), but
+    92213 assigning severity 15 to a batch file in a temp directory is a precision defect regardless.
+    Third appearance of that rule as pure noise, after __PSScriptPolicyTest on T1082 and the Add-Type/csc
+    artefact on T1059.001 - 551 alerts across the dataset from one rule, none of them a detection.
+
+    DESIGN - and the split here answers a question T1112 could not:
+
+      100310 (L8)  / 100311 (L10) read the EID 1 COMMAND LINE and work under the DEFAULT SENSOR. No
+             config change, no new event type. File deletion is visible at the process level.
+      100312 (L8)  / 100313 (L10) read EID 26 and need the FileDeleteDetected config addition.
+
+    So unlike T1003.001 - where ProcessAccess is the ONLY possible source and the sensor genuinely is the
+    ceiling - T1070.004 is detectable today, and the sensor change adds file-level confirmation rather
+    than being the difference between blind and sighted. Worth contrasting the two directly: "the sensor
+    is the ceiling" is true for one and only half-true for the other.
+
+    ⚠️ 100311 and 100313 encode INTENT rather than mechanism - deletion of forensic artefacts (Prefetch,
+    event logs, USN journal, shadow copies) rather than deletion as such. Predicted attack-only, and
+    GENUINELY so: atomic 9 deletes a Prefetch file and the mirror deliberately does not, because nobody
+    clears individual prefetch entries by hand. Same category as 100260 and 100332, not the
+    100241/100251 mirror-scope category.
+
+    ⚠️ 100310 and 100312 predicted to fire in BOTH classes - the mirror deletes a .bat via cmd del and a
+    folder via Remove-Item, which is exactly what the atomics do. Deleting files is not adversarial.
+    ===================================================================================================
+  -->
+
+  <rule id="100311" level="10">
+    <if_group>sysmon_eid1_detections</if_group>
+    <field name="win.eventdata.originalFileName" type="pcre2">(?i)^(cmd|powershell|pwsh|wevtutil|fsutil|vssadmin)(\.exe)?$</field>
+    <!-- ⚠️ The optional (\.exe)?"? is load-bearing. The first draft used wevtutil\s+cl and
+         vssadmin\s+delete\s+shadows, which MISSED `wevtutil.exe cl Security` and
+         `vssadmin.exe delete shadows` because the .exe (and often a closing quote from a fully
+         qualified path) sits between the binary name and its subcommand. Caught in the dry-run.
+         Same class of error as rule 100200's /del omission: the pattern was written against how the
+         command is spoken about, not how it appears on a real command line. -->
+    <field name="win.eventdata.commandLine" type="pcre2">(?i)(\\Prefetch\\|\\winevt\\Logs|wevtutil(\.exe)?"?\s+(cl|clear-log)\b|usn\s+deletejournal|Recycle\.Bin|vssadmin(\.exe)?"?\s+delete\s+shadows)</field>
+    <description>T1070.004 Deletion of forensic artefact: $(win.eventdata.commandLine)</description>
+    <mitre>
+      <id>T1070.004</id>
+      <id>T1070.001</id>
+    </mitre>
+  </rule>
+
+  <rule id="100310" level="8">
+    <if_group>sysmon_eid1_detections</if_group>
+    <field name="win.eventdata.originalFileName" type="pcre2">(?i)^(cmd|powershell|pwsh)(\.exe)?$</field>
+    <field name="win.eventdata.commandLine" type="pcre2">(?i)(\s(del|erase)\s+[/"a-z]|\s(rmdir|rd)\s+/s|Remove-Item)</field>
+    <description>T1070.004 File or folder deleted via command line: $(win.eventdata.commandLine)</description>
+    <mitre>
+      <id>T1070.004</id>
+    </mitre>
+  </rule>
+
+  <!-- EID 26 tiers. Require the FileDeleteDetected addition to sysmonconfig.xml; base rule 61654 is
+       level 0 with no children, so without these two nothing is emitted even when the sensor is on. -->
+  <rule id="100313" level="10">
+    <if_group>sysmon_event_26</if_group>
+    <field name="win.eventdata.targetFilename" type="pcre2">(?i)(\\Prefetch\\|\\winevt\\Logs\\)</field>
+    <!-- ⚠️ PRECISION FIX 2026-08-09, found while measuring T1003.001 - a technique with nothing to do
+         with file deletion. Without this negation 100313 fired 33 attack / 15 benign inside T1003.001's
+         windows, and every single target was C:\Windows\Prefetch\*.pf deleted by svchost.exe:
+         POWERSHELL.EXE-920BBA2A.pf, WMIPRVSE.EXE, CMD.EXE, CONHOST.EXE, TRUSTEDINSTALLER.EXE. That is
+         Windows Prefetch maintenance, which runs continuously and is 100% ambient.
+         Second time one of MY rules became the dominant noise source in an unrelated technique, after
+         100262's ZoneMap housekeeping (392 alerts). Same root cause both times: I matched on a LOCATION
+         that the operating system also writes to, without asking who else touches it.
+         Negating svchost.exe keeps the real signal - atomic T1070.004-9 deletes a Prefetch file via
+         cmd.exe, and an adversary clearing prefetch would not be doing it as the service host. -->
+    <field name="win.eventdata.image" type="pcre2" negate="yes">(?i)\\svchost\.exe$</field>
+    <description>T1070.004 Forensic artefact deleted from disk: $(win.eventdata.targetFilename)</description>
+    <mitre>
+      <id>T1070.004</id>
+      <id>T1070.001</id>
+    </mitre>
+  </rule>
+
+  <rule id="100312" level="8">
+    <if_group>sysmon_event_26</if_group>
+    <!-- ⚠️ The same negation as 100313, and the reason it is HERE too is instructive. Negating
+         svchost.exe in 100313 alone did not remove the Windows Prefetch-maintenance noise - it
+         RE-TIERED it. Those 48 alerts stopped matching the level-10 rule and fell through to this
+         level-8 catch-all, which had no image condition, so the count went from 33/15 on 100313 to
+         38/23 on 100312. The noise moved down one rule instead of going away.
+         Lesson: in a tiered rule set, excluding a noise source from the specific rule pushes it into the
+         general one. The exclusion has to be applied at every tier that can match, or upstream of all of
+         them. Third time one of this project's own rules became a technique's dominant noise source,
+         after 100262 (ZoneMap, 392 alerts) and 100313 (Prefetch, 48) - and the first time the fix itself
+         caused the next instance. -->
+    <field name="win.eventdata.image" type="pcre2" negate="yes">(?i)\\svchost\.exe$</field>
+    <description>T1070.004 File deleted from disk by $(win.eventdata.image): $(win.eventdata.targetFilename)</description>
+    <mitre>
+      <id>T1070.004</id>
+    </mitre>
+  </rule>
+
+  <!--
+    ===================================================================================================
+    T1003.001 OS Credential Dumping: LSASS Memory
+    Custom rule IDs 100320-100321 | levels 10-12
+
+    MEASURED BASELINE (2026-08-09, 5+5 windows, atomic 2, 38 attack / 19 benign):
+    THE CLEANEST INSTANCE OF THE SENSOR-CEILING FINDING IN THE STUDY, and the LSASS dump produced ZERO
+    alerts of any kind.
+
+    Wazuh rule 92900 is LEVEL 12, correctly mapped to T1003.001, and genuinely well written:
+    if_group sysmon_event_10, targetImage matching lsass\.exe, grantedAccess in (0x1010|0x40), and
+    sourceImage negated for C:\Program Files and wmiprvse.exe to suppress routine callers. Nothing is
+    wrong with it. It cannot fire, because ProcessAccess onmatch="include" is EMPTY in the endpoint's
+    config - SwiftOnSecurity ships it that way, with its own comment noting an include with no rules logs
+    nothing - so EID 10 is never generated and the rule has no input.
+
+    So the highest-value technique in the set is undetectable NOT because the rule is missing (T1082,
+    T1016), NOT because it is mistagged (T1136.001), NOT because its severity is suppressed (T1547.001),
+    and NOT because it arrives too late (T1112) - but because the SENSOR emits nothing to read.
+
+    ⚠️⚠️ AND A DEFECT IN THIS PROJECT'S OWN RULESET, FOUND HERE ON TECHNIQUE 14 OF 15.
+    Custom rule 100300 matches `comsvcs\.dll,\s*MiniDump` and the atomic runs exactly that - yet it did
+    not fire. Cause: 100300 chains from `if_group sysmon_eid1_detections`, which only exposes events that
+    a VENDOR 0800-series rule already matched. On T1218.011 rundll32 was spawned by cmd.exe and matched
+    92032, so it entered the group. Here the atomic's executor is powershell, rundll32's parent is
+    powershell.exe, no vendor rule matched, and the event never reached the group my rule depends on.
+    Confirmed by inspection: the only images in T1003.001's attack windows are svchost.exe and
+    powershell.exe. No rundll32 at all.
+
+    IMPLICATION FOR EVERY EID 1 CUSTOM RULE WRITTEN BEFORE THIS POINT (100200, 100230-100233, 100240,
+    100241, 100250-100252, 100270, 100271, 100281, 100282, 100290-100294, 100300-100301, 100310-100311,
+    100330-100332): all of them inherit the vendor ruleset's blind spots. An adversary who changes
+    process lineage - powershell parent instead of cmd - bypasses the entire custom ruleset without
+    touching a single detection condition. That is a serious limitation and it is reported as one rather
+    than silently patched: retro-fitting `if_group sysmon_event1` to fifteen rules now would change the
+    measured counts for fourteen completed techniques and destroy cross-technique comparability.
+
+    THE RULES BELOW USE THE CORRECT PARENT - `if_group sysmon_event1`, the base EID 1 rule, which sees
+    EVERY process creation. So T1003.001 demonstrates both the defect and its fix.
+
+    ⚠️ AND THE DECISIVE DESIGN CONSTRAINT: THE TARGET IS NOT IN THE COMMAND LINE.
+    The atomic runs `rundll32.exe comsvcs.dll, MiniDump 624 <path> full` - the victim is a PID. From EID 1
+    it is IMPOSSIBLE to know which process was dumped. The benign mirror runs the character-identical
+    command against notepad's PID. So unlike T1112, where intent was visible in the value written
+    (DWORD 0 = a control disabled), here intent is NOT PRESENT IN PROCESS TELEMETRY AT ALL. Only EID 10
+    carries targetImage.
+    That makes this the strongest form of the intent-versus-mechanism argument in the study: 100320 can
+    see the mechanism and MUST fire in both classes; only 100321, reading the sensor's ProcessAccess
+    event, can see the target and separate them. The sensor change is not a convenience here - it is the
+    only route to intent.
+
+    ⚠️ AND 92900 WOULD STILL MISS THIS EVEN WITH EID 10 ENABLED. It requires grantedAccess in
+    (0x1010|0x40). comsvcs MiniDump requests full access - typically 0x1fffff or 0x1438 - so the vendor
+    rule's grantedAccess filter excludes the most widely reported real-world variant of the technique.
+    100321 uses a wider set. A precision defect on top of an unreachable rule.
+    ===================================================================================================
+  -->
+
+  <rule id="100321" level="12">
+    <if_group>sysmon_event_10</if_group>
+    <field name="win.eventdata.targetImage" type="pcre2">(?i)\\lsass\.exe$</field>
+    <field name="win.eventdata.grantedAccess" type="pcre2">(?i)0x(1010|40|1410|1438|143a|1fffff|1f1fff|1f2fff|1f3fff)\b</field>
+    <field name="win.eventdata.sourceImage" type="pcre2" negate="yes">(?i)\\(wininit|services|csrss|lsass|svchost|MsMpEng|wazuh-agent)\.exe$</field>
+    <description>T1003.001 LSASS memory accessed by $(win.eventdata.sourceImage) with $(win.eventdata.grantedAccess)</description>
+    <mitre>
+      <id>T1003.001</id>
+    </mitre>
+  </rule>
+
+  <!-- Mechanism only. Chains from sysmon_event1, NOT sysmon_eid1_detections, so it does not depend on a
+       vendor rule matching first - which is exactly why 100300 missed this technique. Predicted to fire
+       in BOTH classes, because the mirror runs the identical command against notepad and the command
+       line contains a PID rather than a process name. -->
+  <rule id="100320" level="10">
+    <if_group>sysmon_event1</if_group>
+    <field name="win.eventdata.originalFileName" type="pcre2">(?i)^RUNDLL32\.EXE$</field>
+    <field name="win.eventdata.commandLine" type="pcre2">(?i)comsvcs\.dll[\s,"]+\s*MiniDump</field>
+    <description>T1003.001 Process memory dumped via comsvcs.dll MiniDump: $(win.eventdata.commandLine)</description>
+    <mitre>
+      <id>T1003.001</id>
+      <id>T1218.011</id>
+    </mitre>
+  </rule>
+
 </group>
