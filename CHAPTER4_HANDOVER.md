@@ -40,8 +40,8 @@
 | ML metrics with the robustness check | ✅ Complete, and stronger than required | §6 |
 | Limitations material | ✅ Complete | §9 |
 | *Your guidance:* robustness without rule-ID/path features | ✅ **Done — performance holds.** §6.2 | `ml/README.md` |
-| *Your guidance:* confusion matrices | ✅ §6.4 | |
-| *Your guidance:* feature importance rankings | ✅ §6.7 | |
+| *Your guidance:* confusion matrices | ✅ §6.4 — **and now a figure** | `ml/figures/fig1` |
+| *Your guidance:* feature importance rankings | ✅ §6.7 — **and now a figure** | `ml/figures/fig2` |
 | *Your guidance:* Navigator layers side by side | ✅ Rendered and verified | `navigator_layers/figures/` |
 | *Your guidance:* §3.4 baseline — rule level alone, no ML | ✅ **Built today. Criterion met.** §6.6 | |
 | *Your guidance:* running note of surprises | ✅ §10 | |
@@ -426,6 +426,30 @@ never "none".**
 
 ---
 
+## 11a. Figures — all eight are built and visually verified
+
+| # | File | Use it for |
+|---|---|---|
+| 1 | `ml/figures/fig1_confusion_matrix.svg` | The error balance — 471 missed vs 63 false alarms |
+| 2 | `ml/figures/fig2_feature_importance.svg` | Top 18 features, each with its attack share |
+| 3 | `ml/figures/fig3_precision_recall.svg` | Model curve with every rule heuristic below it |
+| 4 | `ml/figures/fig4_operating_points.svg` | Recall vs analyst workload — deployability |
+| 5 | `ml/figures/fig5_severity_vs_truth.svg` | **Severity anti-correlated with truth** |
+| 6 | `ml/figures/fig6_rule_baselines.svg` | Model vs the ruleset, against "escalate everything" |
+| 7 | `navigator_layers/figures/01_default_ruleset_v19.svg` | Coverage, stock Wazuh |
+| 8 | `navigator_layers/figures/02_custom_ruleset_v19.svg` | Coverage, engineered ruleset |
+
+**Suggested pairings.** Figures 7+8 side by side are the coverage story. **Figures 1 and 4 must be
+published together** — Figure 1 alone understates the miss rate, Figure 4 alone hides it. Figure 5 is
+the most striking single result and currently has no equivalent in the text.
+
+⚠️ **Three of the six ML figures were unusable on first render** — overlapping labels in figs 3, 5 and 6
+— while the script logged success every time. Fixed and re-inspected. **Re-render and look at the image
+after any change**; layout defects are invisible to every other check. Same lesson as the Navigator
+layers, which validated perfectly as JSON and drew 5 of 15 techniques.
+
+---
+
 ## 12. Where everything lives
 
 | Artefact | Path |
@@ -437,8 +461,10 @@ never "none".**
 | ML code (reproduces everything in §6) | `scripts/triage_model.py` |
 | Navigator layers — **citable, v14** | `navigator_layers/01_default_ruleset.json`, `02_custom_ruleset.json` |
 | Navigator layers — renderable, v19 | `navigator_layers/*_v19.json` |
-| **Chapter 4 figures (SVG)** | `navigator_layers/figures/` |
+| **Chapter 4 figures — coverage (SVG)** | `navigator_layers/figures/` |
+| **Chapter 4 figures — ML (SVG)** | `ml/figures/` |
 | Layer generator | `scripts/build_navigator_layers.py` |
+| ML figure generator | `scripts/make_ml_figures.py` |
 | Labelled dataset | `data/labelled_alerts.csv` |
 | Detonation log | `data/detonation_log.csv` |
 | Rule definitions | `wazuh_rules/local_rules.xml` |
@@ -449,3 +475,4 @@ never "none".**
 **Reproduce §6:** `pip install scikit-learn xgboost --break-system-packages` then
 `python3 scripts/triage_model.py`
 **Reproduce §7:** `python3 scripts/build_navigator_layers.py`
+**Reproduce all ML figures:** `python3 scripts/make_ml_figures.py`
