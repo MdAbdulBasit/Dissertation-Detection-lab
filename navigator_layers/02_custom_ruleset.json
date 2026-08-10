@@ -127,6 +127,69 @@
       "comment": "DETECTED + DISCRIMINATING  (phase: baseline)\nattack alerts 85 / benign 15\ncarrying T1105 exactly: 40 attack, 0 benign\nrules with exact ID: 92074, 92207, 92213, 92227\nNO CUSTOM RULE WRITTEN - the default ruleset was already correct here, so writing one would duplicate working detection and inflate the apparent contribution of this project.",
       "enabled": true,
       "showSubtechniques": true
+    },
+    {
+      "techniqueID": "T1003",
+      "tactic": "credential-access",
+      "comment": "STRUCTURAL ROW - not a measurement.\nPresent only so the Navigator will draw its sub-technique(s): T1003.001.\nDeliberately unscored: the study measured the sub-technique, not the parent, and colouring this cell would double-count it in the coverage tally.",
+      "enabled": true,
+      "showSubtechniques": true
+    },
+    {
+      "techniqueID": "T1053",
+      "tactic": "persistence",
+      "comment": "STRUCTURAL ROW - not a measurement.\nPresent only so the Navigator will draw its sub-technique(s): T1053.005.\nDeliberately unscored: the study measured the sub-technique, not the parent, and colouring this cell would double-count it in the coverage tally.",
+      "enabled": true,
+      "showSubtechniques": true
+    },
+    {
+      "techniqueID": "T1059",
+      "tactic": "execution",
+      "comment": "STRUCTURAL ROW - not a measurement.\nPresent only so the Navigator will draw its sub-technique(s): T1059.001, T1059.003.\nDeliberately unscored: the study measured the sub-technique, not the parent, and colouring this cell would double-count it in the coverage tally.",
+      "enabled": true,
+      "showSubtechniques": true
+    },
+    {
+      "techniqueID": "T1070",
+      "tactic": "defense-evasion",
+      "comment": "STRUCTURAL ROW - not a measurement.\nPresent only so the Navigator will draw its sub-technique(s): T1070.004.\nDeliberately unscored: the study measured the sub-technique, not the parent, and colouring this cell would double-count it in the coverage tally.",
+      "enabled": true,
+      "showSubtechniques": true
+    },
+    {
+      "techniqueID": "T1087",
+      "tactic": "discovery",
+      "comment": "STRUCTURAL ROW - not a measurement.\nPresent only so the Navigator will draw its sub-technique(s): T1087.001.\nDeliberately unscored: the study measured the sub-technique, not the parent, and colouring this cell would double-count it in the coverage tally.",
+      "enabled": true,
+      "showSubtechniques": true
+    },
+    {
+      "techniqueID": "T1136",
+      "tactic": "persistence",
+      "comment": "STRUCTURAL ROW - not a measurement.\nPresent only so the Navigator will draw its sub-technique(s): T1136.001.\nDeliberately unscored: the study measured the sub-technique, not the parent, and colouring this cell would double-count it in the coverage tally.",
+      "enabled": true,
+      "showSubtechniques": true
+    },
+    {
+      "techniqueID": "T1218",
+      "tactic": "defense-evasion",
+      "comment": "STRUCTURAL ROW - not a measurement.\nPresent only so the Navigator will draw its sub-technique(s): T1218.011.\nDeliberately unscored: the study measured the sub-technique, not the parent, and colouring this cell would double-count it in the coverage tally.",
+      "enabled": true,
+      "showSubtechniques": true
+    },
+    {
+      "techniqueID": "T1547",
+      "tactic": "persistence",
+      "comment": "STRUCTURAL ROW - not a measurement.\nPresent only so the Navigator will draw its sub-technique(s): T1547.001.\nDeliberately unscored: the study measured the sub-technique, not the parent, and colouring this cell would double-count it in the coverage tally.",
+      "enabled": true,
+      "showSubtechniques": true
+    },
+    {
+      "techniqueID": "T1560",
+      "tactic": "collection",
+      "comment": "STRUCTURAL ROW - not a measurement.\nPresent only so the Navigator will draw its sub-technique(s): T1560.001.\nDeliberately unscored: the study measured the sub-technique, not the parent, and colouring this cell would double-count it in the coverage tally.",
+      "enabled": true,
+      "showSubtechniques": true
     }
   ],
   "gradient": {

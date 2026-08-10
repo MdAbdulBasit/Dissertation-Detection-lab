@@ -191,7 +191,59 @@ def build_layer(rows, which):
             "enabled": True,
             "showSubtechniques": True,
         })
+
+    entries.extend(parent_container_rows(entries))
     return entries, tally
+
+
+def parent_container_rows(entries):
+    """
+    ⚠️ WITHOUT THIS THE FIGURE RENDERS 5 TECHNIQUES INSTEAD OF 15.
+
+    Ten of the fifteen studied techniques are SUB-techniques (T1087.001, T1059.001, T1059.003,
+    T1053.005, T1136.001, T1547.001, T1218.011, T1070.004, T1560.001, T1003.001). In the Navigator a
+    sub-technique is not a cell of its own - it is drawn inside its parent's expanded row. Two things
+    therefore have to be true before it is visible at all:
+
+        1. the PARENT technique must be present and enabled - otherwise `hideDisabled: true` removes
+           the whole row, and the sub-technique inside it goes with it;
+        2. the parent must carry `showSubtechniques: true`, or the row renders collapsed and the
+           sub-technique stays hidden behind the expand arrow.
+
+    Neither was true. The layers validated perfectly as DATA - 15 entries, correct scores, correct
+    tactics - and would have displayed only the five top-level techniques (T1082, T1033, T1016, T1112,
+    T1105). A figure can be right in every field it contains and still be wrong about what it shows,
+    and that failure is invisible to every check that does not actually render it.
+
+    The parent rows are deliberately emitted with NO `score` key. Scoring them 0 would paint nine extra
+    red cells and turn a tally of seven blind techniques into sixteen; these rows are scaffolding for
+    the matrix, not measurements. The tactic is inherited from the child so the parent lands in the
+    same column.
+    """
+    by_parent = {}
+    for e in entries:
+        tid = e["techniqueID"]
+        if "." not in tid:
+            continue
+        by_parent.setdefault(tid.split(".")[0], []).append((tid, e["tactic"]))
+
+    present = {e["techniqueID"] for e in entries}
+    rows = []
+    for parent, children in sorted(by_parent.items()):
+        if parent in present:          # already measured in its own right - leave it alone
+            continue
+        rows.append({
+            "techniqueID": parent,
+            "tactic": children[0][1],
+            "comment": ("STRUCTURAL ROW - not a measurement.\n"
+                        "Present only so the Navigator will draw its sub-technique(s): "
+                        + ", ".join(c[0] for c in children) + ".\n"
+                        "Deliberately unscored: the study measured the sub-technique, not the parent, "
+                        "and colouring this cell would double-count it in the coverage tally."),
+            "enabled": True,
+            "showSubtechniques": True,
+        })
+    return rows
 
 
 def layer_json(name, description, entries):
@@ -244,7 +296,7 @@ def main():
         print(f"\n{name}  ->  {path}")
         for s in (0, 1, 2, 3):
             if tally[s]:
-                names = [e["techniqueID"] for e in entries if e["score"] == s]
+                names = [e["techniqueID"] for e in entries if e.get("score") == s]
                 print(f"   {s}  {LABEL[s]:28} {tally[s]:2}   {', '.join(names)}")
 
     print("\nLoad these at https://mitre-attack.github.io/attack-navigator/ (Open Existing Layer > Upload)")

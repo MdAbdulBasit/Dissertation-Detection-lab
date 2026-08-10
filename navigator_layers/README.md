@@ -9,6 +9,22 @@ python3 scripts/build_navigator_layers.py
 
 Load at <https://mitre-attack.github.io/attack-navigator/> → *Open Existing Layer* → *Upload from local*.
 
+## ⚠️ Why each layer has 24 rows but only 15 scores
+
+**Ten of the fifteen studied techniques are sub-techniques.** In the Navigator a sub-technique is not a
+cell of its own — it is drawn *inside* its parent's expanded row. So each layer also carries **9
+structural parent rows** (T1003, T1053, T1059, T1070, T1087, T1136, T1218, T1547, T1560), enabled and
+set to `showSubtechniques: true`, purely so the matrix will draw their children.
+
+Those 9 rows are **deliberately unscored** and render uncoloured. They are scaffolding, not
+measurements — scoring them would double-count techniques the study never measured at parent level.
+
+This was a real bug, found only by asking how the file would *render*. Before the fix the layers
+validated perfectly as data — 15 entries, correct scores, correct tactics — and would have displayed
+**five** techniques, because the nine missing parents plus `hideDisabled: true` silently removed ten
+sub-techniques from the matrix. **A figure can be correct in every field it contains and still be wrong
+about what it shows.** No data-level check catches that; only opening it does.
+
 | File | Setup measured |
 |---|---|
 | `01_default_ruleset.json` | Stock Wazuh 4.14.6, default Sysmon config |
