@@ -242,6 +242,112 @@ def evaluate(rows, spec_name, spec, groups, split_name, splitter):
     }
 
 
+def rule_baselines(rows):
+    """
+    ⚠️ THE COMPARISON THE THESIS ACTUALLY NEEDS, and it was missing from the first version of this
+    script. Reporting "the model reaches macro F1 0.784 against a 0.42 majority baseline" compares the
+    model against predicting the most common class - not against the RULESET it is meant to supplement.
+    An examiner asks that immediately, and the honest answer has to be a measured number.
+
+    Three heuristics an analyst could actually apply to this alert stream with no model at all:
+
+      severity>=N   escalate anything at Wazuh level N or above. This is what alert triage looks like
+                    in practice when there is no model: a severity threshold.
+      any-custom    escalate if one of the 37 engineered rules fired. Tests whether the rules built in
+                    this project function as a triage signal, which is the strongest form of the
+                    "do we even need a model" question.
+      technique-tagged  escalate if the alert carries the ATT&CK ID of the technique under test, i.e.
+                    perfect attribution. An upper bound on what correct labelling alone can do.
+    """
+    y = np.array([1 if r["class"] == "attack" else 0 for r in rows])
+    out = []
+
+    for lvl in (6, 8, 10, 12):
+        pred = np.array([1 if int(r["rule_level"] or 0) >= lvl else 0 for r in rows])
+        out.append((f"severity >= {lvl}", pred))
+
+    pred = np.array([1 if r["rule_id"].startswith(("1002", "1003")) else 0 for r in rows])
+    out.append(("any custom rule fired", pred))
+
+    pred = np.array([1 if r["technique_id"] in (r["rule_mitre"] or "").split(";") else 0 for r in rows])
+    out.append(("alert tagged with the technique", pred))
+
+    print("\n" + "=" * 100)
+    print("RULE-BASED BASELINES - what an analyst gets with no model at all")
+    print("=" * 100)
+    print(f"{'heuristic':34} {'atk P':>7} {'atk R':>7} {'atk F1':>7} {'ben F1':>7} {'macroF1':>8}")
+    results = []
+    for name, pred in out:
+        rep = classification_report(y, pred, target_names=["benign", "attack"],
+                                    output_dict=True, zero_division=0)
+        results.append({"features": f"BASELINE: {name}", "split": "n/a (no training)",
+                        "attack_precision": rep["attack"]["precision"],
+                        "attack_recall": rep["attack"]["recall"],
+                        "attack_f1": rep["attack"]["f1-score"],
+                        "benign_precision": rep["benign"]["precision"],
+                        "benign_recall": rep["benign"]["recall"],
+                        "benign_f1": rep["benign"]["f1-score"],
+                        "macro_f1": rep["macro avg"]["f1-score"], "pr_auc": float("nan")})
+        print(f"{name:34} {rep['attack']['precision']:7.3f} {rep['attack']['recall']:7.3f} "
+              f"{rep['attack']['f1-score']:7.3f} {rep['benign']['f1-score']:7.3f} "
+              f"{rep['macro avg']['f1-score']:8.3f}")
+    maj = np.ones(len(y))
+    rep = classification_report(y, maj, target_names=["benign", "attack"], output_dict=True,
+                                zero_division=0)
+    print(f"{'always predict attack':34} {rep['attack']['precision']:7.3f} "
+          f"{rep['attack']['recall']:7.3f} {rep['attack']['f1-score']:7.3f} "
+          f"{rep['benign']['f1-score']:7.3f} {rep['macro avg']['f1-score']:8.3f}")
+    return results
+
+
+def per_fold_variance(rows, spec, groups, splitter, seeds=(42, 7, 1337)):
+    """Macro F1 per fold and across seeds. A single number from a single seed is not a result."""
+    y = np.array([1 if r["class"] == "attack" else 0 for r in rows])
+    g = np.array(groups)
+    scores = []
+    for seed in seeds:
+        for tr, te in splitter.split(np.zeros(len(rows)), y, g):
+            train = [rows[i] for i in tr]; test = [rows[i] for i in te]
+            s = dict(spec)
+            Xtr, _ = build_matrix(train, s)
+            Xte, _ = build_matrix(test, s, fit_on=train)
+            k = min(Xtr.shape[1], Xte.shape[1]); Xtr, Xte = Xtr[:, :k], Xte[:, :k]
+            clf = RandomForestClassifier(n_estimators=300, class_weight="balanced",
+                                         min_samples_leaf=2, random_state=seed, n_jobs=-1)
+            clf.fit(Xtr, y[tr])
+            rep = classification_report(y[te], clf.predict(Xte), output_dict=True, zero_division=0)
+            scores.append(rep["macro avg"]["f1-score"])
+    return np.mean(scores), np.std(scores), min(scores), max(scores), len(scores)
+
+
+def per_technique_breakdown(rows, spec):
+    """Where does it fail? LeaveOneTechniqueOut, reported per held-out technique."""
+    y = np.array([1 if r["class"] == "attack" else 0 for r in rows])
+    g = np.array([r["technique_id"] for r in rows])
+    print("\n" + "=" * 100)
+    print("PER-TECHNIQUE - LeaveOneTechniqueOut, B_no_rule. Each row: model never saw this technique.")
+    print("=" * 100)
+    print(f"{'held-out technique':13} {'n':>5} {'atk':>5} {'ben':>5} {'atk F1':>7} {'ben F1':>7} {'macroF1':>8}")
+    rowsout = []
+    for tech in sorted(set(g)):
+        te = np.where(g == tech)[0]; tr = np.where(g != tech)[0]
+        train = [rows[i] for i in tr]; test = [rows[i] for i in te]
+        s = dict(spec)
+        Xtr, _ = build_matrix(train, s)
+        Xte, _ = build_matrix(test, s, fit_on=train)
+        k = min(Xtr.shape[1], Xte.shape[1]); Xtr, Xte = Xtr[:, :k], Xte[:, :k]
+        clf = RandomForestClassifier(n_estimators=300, class_weight="balanced",
+                                     min_samples_leaf=2, random_state=42, n_jobs=-1)
+        clf.fit(Xtr, y[tr])
+        rep = classification_report(y[te], clf.predict(Xte), output_dict=True, zero_division=0,
+                                    labels=[0, 1], target_names=["benign", "attack"])
+        na = int((y[te] == 1).sum()); nb = int((y[te] == 0).sum())
+        print(f"{tech:13} {len(te):5} {na:5} {nb:5} {rep['attack']['f1-score']:7.3f} "
+              f"{rep['benign']['f1-score']:7.3f} {rep['macro avg']['f1-score']:8.3f}")
+        rowsout.append((tech, len(te), na, nb, rep["macro avg"]["f1-score"]))
+    return rowsout
+
+
 def main():
     rows = load_rows()
     y = [r["class"] for r in rows]
@@ -287,6 +393,18 @@ def main():
             print(f"{sname:13} {r['attack_precision']:7.3f} {r['attack_recall']:7.3f} "
                   f"{r['attack_f1']:7.3f} {r['benign_precision']:7.3f} {r['benign_recall']:7.3f} "
                   f"{r['benign_f1']:7.3f} {r['macro_f1']:8.3f} {r['pr_auc']:7.3f}")
+
+    results += rule_baselines(rows)
+
+    print("\n" + "=" * 100)
+    print("FOLD AND SEED VARIANCE - B_no_rule, GroupKFold by window, 3 seeds x 5 folds")
+    print("=" * 100)
+    m, sd, lo, hi, n = per_fold_variance(rows, dict(FEATURE_SETS["B_no_rule"]),
+                                         [r["session_id"] for r in rows], GroupKFold(n_splits=5))
+    print(f"  macro F1 mean {m:.3f}  sd {sd:.3f}  range {lo:.3f}-{hi:.3f}  over {n} fits")
+    print("  A single number from a single seed is not a result; this is the spread behind it.")
+
+    per_technique_breakdown(rows, dict(FEATURE_SETS["B_no_rule"]))
 
     os.makedirs("ml", exist_ok=True)
     with open(os.path.join("ml", "triage_results.csv"), "w", newline="", encoding="utf-8") as fh:

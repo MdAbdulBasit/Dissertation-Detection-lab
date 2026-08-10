@@ -17,6 +17,17 @@ So: can a classifier separate attack from benign **from the same telemetry**, wh
 
 **A high score here is the failure case.** The easiest way to get one is to learn the lab's own habits.
 
+> ### The answer, in four numbers
+> | | macro F1 |
+> |---|---|
+> | Escalate everything | 0.417 |
+> | Escalate on correct ATT&CK attribution | **0.412** |
+> | Escalate when any of the 37 engineered rules fires | **0.379** |
+> | Model, rule identity withheld | **0.784 ± 0.071** |
+>
+> **Two of the three rule-based heuristics lose to escalating everything.** The full table is
+> [below](#-rule-based-baselines--the-comparison-that-matters).
+
 ## Data
 
 | | |
@@ -24,7 +35,8 @@ So: can a classifier separate attack from benign **from the same telemetry**, wh
 | In-window alerts | 2,683 — 1,919 attack / 764 benign |
 | Grouping unit | **259 detonation windows** (median 8 alerts each, max 58) |
 | Techniques | 15 |
-| Majority-class baseline | accuracy 0.715, **macro F1 ≈ 0.42** |
+| Majority-class baseline | accuracy 0.715, macro F1 0.417 |
+| **Strongest rule-based baseline** | **macro F1 0.428** (severity ≥ 6) — see below |
 
 Alerts inside one window share command lines almost exactly, so a random alert-level split would put
 near-duplicates on both sides. Two grouped splits are used instead:
@@ -50,23 +62,104 @@ near-duplicates on both sides. Two grouped splits are used instead:
 | B — no rule identity | 0.706 | 0.372 | **0.539** | 0.736 |
 | C — sanitised text only | 0.660 | 0.420 | **0.540** | 0.721 |
 
+### ⭐ Rule-based baselines — the comparison that matters
+
+Comparing the model against a *majority-class* baseline is not the comparison this thesis needs. The
+question is whether a model beats **the ruleset it is meant to supplement**. Three heuristics an analyst
+could apply with no model at all, measured on the same 2,683 alerts:
+
+| Triage heuristic | atk P | atk R | atk F1 | ben F1 | **macro F1** |
+|---|---|---|---|---|---|
+| severity ≥ 6 | 0.693 | 0.377 | 0.488 | 0.369 | **0.428** |
+| severity ≥ 8 | 0.692 | 0.369 | 0.482 | 0.370 | **0.426** |
+| severity ≥ 10 | 0.728 | 0.195 | 0.308 | 0.426 | **0.367** |
+| severity ≥ 12 | 0.791 | 0.063 | 0.117 | 0.444 | **0.281** |
+| **always predict "attack"** | 0.715 | 1.000 | 0.834 | 0.000 | **0.417** |
+| alert tagged with the correct technique | 0.715 | 0.298 | 0.420 | 0.405 | **0.412** |
+| **any of the 37 engineered rules fired** | 0.680 | 0.250 | 0.365 | 0.393 | **0.379** |
+| | | | | | |
+| **Random Forest, no rule identity** | 0.958 | 0.755 | 0.844 | 0.724 | **0.784** |
+
+**Three of these are worth stating plainly.**
+
+**The engineered ruleset is worse than useless as a triage signal — 0.379 against 0.417 for guessing.**
+Thirty-seven rules that took a fortnight to build, and using "did a custom rule fire?" to decide what to
+escalate performs *below* escalating everything. They are good at *attribution* and carry no information
+about *intent*, which is exactly what the Navigator layers showed from the other direction.
+
+**Perfect ATT&CK attribution is also worth nothing for triage — 0.412.** Even if every alert were
+tagged with the correct technique, that alone would not help an analyst decide what to look at.
+
+**Severity is barely better than chance, and gets worse as you raise it.** Level ≥ 12 reaches 0.791
+precision but 0.063 recall — it finds almost nothing. The severity field, the primary triage mechanism
+in every SIEM, carries very little signal on this dataset.
+
+**Against all of that, the model reaches 0.784** — roughly double the best rule heuristic.
+
+### Variance
+
+`B_no_rule`, GroupKFold by window, **3 seeds × 5 folds = 15 fits**:
+
+> macro F1 **mean 0.783, sd 0.071, range 0.681 – 0.856**
+
+A single number from a single seed is not a result. The spread is wide enough to matter and narrow
+enough that the gap to 0.428 is not in doubt.
+
+### Per-technique — where it fails
+
+LeaveOneTechniqueOut, `B_no_rule`. Each row is a technique the model **never saw in training**:
+
+| Held out | n | atk F1 | ben F1 | macro F1 |
+|---|---|---|---|---|
+| T1070.004 | 130 | 0.876 | 0.769 | **0.822** |
+| T1053.005 | 149 | 0.777 | 0.683 | **0.730** |
+| T1059.001 | 76 | 0.924 | 0.500 | **0.712** |
+| T1087.001 | 166 | 0.849 | 0.328 | 0.588 |
+| T1112 | 332 | 0.643 | 0.385 | 0.514 |
+| T1033 | 338 | 0.906 | 0.065 | 0.485 |
+| T1547.001 | 142 | 0.431 | 0.519 | 0.475 |
+| T1082 | 388 | 0.790 | 0.144 | 0.467 |
+| T1016 | 135 | 0.866 | **0.000** | 0.433 |
+| T1003.001 | 35 | 0.500 | 0.333 | 0.417 |
+| T1105 | 100 | 0.593 | 0.154 | 0.373 |
+| T1560.001 | 53 | 0.571 | 0.167 | 0.369 |
+| T1218.011 | 101 | 0.684 | 0.040 | 0.362 |
+| T1059.003 | 60 | 0.588 | **0.000** | 0.294 |
+| **T1136.001** | **478** | **0.170** | 0.406 | **0.288** |
+
+Generalisation is not merely poor on average — it is **wildly inconsistent**, from 0.822 down to 0.288.
+Several techniques produce benign F1 of **0.000**: the model labels everything as attack. And the worst
+result is on **T1136.001, the technique with the most data (478 alerts)** — more training data for a
+technique does not help when that technique is the one held out.
+
 ## What this means
 
-**1. Within known techniques the model clearly beats rule logic.** Macro F1 **0.784 without rule
-identity**, against a 0.42 majority baseline — and against a ruleset that, measured on the same data,
-discriminates on exactly one technique out of fifteen. Attack precision of 0.958 at 0.755 recall is an
-operationally useful trade: it would suppress most benign alerts while keeping three-quarters of real
-detections.
+**1. Within known techniques the model clearly beats every rule-based alternative.** Macro F1 **0.784
+without rule identity, against a best-case rule heuristic of 0.428** — and, decisively, against **0.379
+for the 37 engineered rules and 0.412 for perfect ATT&CK attribution, both of which lose to the 0.417
+you get by escalating everything**. Attack precision of 0.958 at 0.755 recall is an operationally useful
+trade: it would suppress most benign alerts while keeping three-quarters of real detections.
+
+This is the claim the dissertation rests on, and it now has a like-for-like comparison behind it rather
+than a majority-class strawman. **Severity and attribution — the two outputs detection engineering
+actually produces — carry almost no triage signal. The model does.**
 
 **2. Removing rule identity costs almost nothing** — 0.823 → 0.784. This was the main worry, because
 `92052` alone is 359 attack / 2 benign and a model could have scored well by memorising it. It didn't
 need to.
 
-**3. It does not generalise to an unseen technique.** Macro F1 collapses to ~0.54, benign F1 to ~0.37.
-The model learns the command patterns of techniques it has seen, not a transferable notion of
-maliciousness. **For a SOC this is the important limitation**: it would help with known techniques and
+**3. It does not generalise to an unseen technique, and the per-technique table shows the failure is
+erratic rather than uniform.** Macro F1 collapses to ~0.54 on average, but that average hides a range
+from **0.822 (T1070.004) to 0.288 (T1136.001)**, with benign F1 of exactly **0.000** on T1016 and
+T1059.003 — the model simply calls everything an attack. The worst result is on the technique with the
+*most* data. The model learns the command patterns of techniques it has seen, not a transferable notion
+of maliciousness. **For a SOC this is the important limitation**: it would help with known techniques and
 offer little against a novel one — the same weakness as the rules it is meant to supplement, arrived at
 from the opposite direction.
+
+**5. The headline is a distribution, not a number.** 0.783 ± 0.071 over 15 fits, range 0.681–0.856. The
+worst fold still beats the best rule heuristic by a wide margin, which is why the comparison survives
+the spread.
 
 **4. The benign class is always the weaker one** — precision 0.56–0.67 even in the best case. Benign
 alerts are the operationally expensive ones, so this is where the remaining error lives.
@@ -96,6 +189,24 @@ be deleted outright, which also destroys some genuine information — an attacke
 > why a plausible-looking token was 0% or 100% of one class. **A leak that survives is indistinguishable
 > from a good result.**
 
+### Layer 4 — a residual, found by re-auditing after the fact, and measured rather than assumed
+
+Re-reading the feature importances after the baselines were added surfaced one more: **`user delete`,
+n=27, 0.0% attack** — every occurrence benign, every one in T1136.001.
+
+The cause is **experimental design, not preprocessing**. The benign mirror creates *and deletes* its
+service account inside one command line, so the teardown lands inside the labelled window. The atomic's
+teardown runs via `Invoke-AtomicTest -Cleanup`, *outside* it. The model was not learning that deletion is
+benign — it was learning **which harness cleans up on the clock**. No sanitiser would catch this, because
+`/delete` is legitimate telemetry: an attacker really might delete an account.
+
+**Measured impact: dropping all 27 alerts moves macro F1 from 0.784 to 0.783.** Immaterial — but it was
+established by removing them and re-fitting, not by arguing that 27 out of 2,683 could not matter.
+
+The transferable point is not the 0.001. It is that **three rounds of sanitisation and an explicit leak
+check still left one**, and it was only found by asking the same question a fourth time. Leak-hunting has
+no natural stopping point; the honest claim is "none remaining that I could find", never "none".
+
 ## Honest limitations
 
 - **259 windows is the real sample size**, not 2,683 alerts.
@@ -103,5 +214,13 @@ be deleted outright, which also destroys some genuine information — an attacke
 - The benign mirror is *designed* to resemble the attack; a production benign distribution is far wider
   and messier, so real-world precision would be lower.
 - Deleting harness tokens removed some legitimate signal along with the leak.
+- **Teardown asymmetry.** The benign mirror cleans up inside the labelled window; `Invoke-AtomicTest
+  -Cleanup` runs outside it. Measured cost 0.001 macro F1 (layer 4 above), but the *design* flaw is
+  general — any future technique whose mirror tears down in-window reintroduces it, and no amount of
+  text sanitisation will catch it. A redesign would run both cleanups outside the window.
 - No hyperparameter search — a single Random Forest, deliberately, since the comparison between feature
-  sets is the experiment rather than peak performance.
+  sets is the experiment rather than peak performance. XGBoost, threshold/operating-point selection and
+  confusion matrices remain open; none of them change the rule-versus-model comparison, which is the
+  contribution.
+- **259 windows is also the limit on the baseline comparison.** The rule heuristics are measured on the
+  same alerts, so they inherit every one of these constraints.
