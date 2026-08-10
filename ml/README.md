@@ -96,7 +96,57 @@ in every SIEM, carries very little signal on this dataset.
 
 **Against all of that, the model reaches 0.784** — roughly double the best rule heuristic.
 
-### Random Forest vs XGBoost — the algorithm is not the bottleneck
+### ⭐⭐ The §3.4 success criterion — false positives at matched recall
+
+The dissertation's stated criterion is **"a measurable false-positive reduction against a detection-only
+baseline, without loss of recall."** Every comparison above evaluates the two approaches at *their own*
+operating points, which is not that question. This one holds recall fixed.
+
+**Detection-only baseline = rank by Wazuh rule level alone, no model** — what a SOC does today with an
+out-of-the-box SIEM.
+
+| Detection-only baseline | its recall | its false positives | Model @ same recall | model FPs | **FP reduction** |
+|---|---|---|---|---|---|
+| rule level ≥ 4 | 0.691 | **605** | thr 0.79 (recall 0.706) | **2** | **99.7%** |
+| rule level ≥ 5 | 0.397 | 354 | thr 0.95 (recall 0.601) | 1 | 99.7% |
+| rule level ≥ 8 | 0.369 | 316 | thr 0.99 (recall 0.372) | 0 | 100% |
+| rule level ≥ 10 | 0.195 | 140 | thr 0.99 (recall 0.372) | 0 | 100% |
+| rule level ≥ 12 | 0.063 | 32 | thr 0.99 (recall 0.372) | 0 | 100% |
+
+**At the baseline's best achievable recall (69.1%), the model matches it with 2 false positives instead
+of 605.** Recall is held at or above the baseline's in every row, so nothing is traded away. **The §3.4
+criterion is met.**
+
+#### Why the reduction is so large — and why that is the real finding
+
+A 99.7% reduction invites suspicion, so the mechanism matters. It is not that the model is remarkable.
+**It is that Wazuh's severity level carries almost no signal on this data, and at the inclusive end is
+slightly *anti*-correlated with ground truth.**
+
+| Rule level | Attack | Benign | % attack |
+|---|---|---|---|
+| 3 | 593 | 159 | 78.9% |
+| 4 | 565 | 251 | 69.2% |
+| 5 | 38 | 33 | 53.5% |
+| 8 | 328 | 170 | 65.9% |
+| 10 | 254 | 108 | 70.2% |
+| 12 | 111 | 11 | **91.0%** |
+| **15** | **10** | **21** | **32.3%** |
+
+Three things follow, and each is quotable:
+
+**Level ≥ 4 flags a *higher* proportion of the benign class (79.2%) than the attack class (69.1%).** As a
+ranking signal that is worse than useless — filtering on it discards attacks faster than noise.
+
+**Level 15, the maximum severity Wazuh can assign, is 32.3% attack — majority false positive.** An
+analyst working strictly top-down by severity would start with the least reliable alerts in the queue.
+
+**Level 12 is the only genuinely informative band at 91.0% attack**, and it contains 111 of 1,919 attack
+alerts — 5.8%. Severity is informative exactly once, over a twentieth of the data.
+
+**The baseline also cannot exceed 69.1% recall at any threshold**, because 593 attack alerts sit at level
+3 and fall below the lowest useful cut. Nearly a third of real attack activity is invisible to
+severity-based triage at any setting.
 
 | Classifier | Split | atk F1 | ben F1 | **macro F1** | PR-AUC |
 |---|---|---|---|---|---|

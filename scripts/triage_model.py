@@ -384,6 +384,61 @@ def rule_baselines(rows):
     return results
 
 
+def fp_reduction_vs_severity(rows, spec, groups, splitter, clf_name="RandomForest"):
+    """
+    ⭐ THE DISSERTATION'S STATED SUCCESS CRITERION (§3.4):
+       "a measurable false-positive reduction against a detection-only baseline, WITHOUT LOSS OF RECALL"
+
+    Every other comparison in this file comparees the two approaches at THEIR OWN operating points, which
+    is not what §3.4 asks. The criterion is a matched-recall comparison: hold recall at whatever the
+    detection-only baseline achieves, and count how many fewer false positives the model produces.
+
+    DETECTION-ONLY BASELINE = rank by Wazuh rule level alone, no model. That is precisely what a SOC does
+    today with an out-of-the-box SIEM, and it is the comparison the write-up promised.
+
+    Rule level is a coarse integer, so the baseline offers only a handful of operating points. For each
+    one we take its recall as the floor, find the LOWEST-cost model threshold that still meets or beats
+    that recall, and compare false-positive counts. Choosing the model point by "cheapest that matches
+    recall" rather than "best F1" is deliberate - it is the honest way to answer "same detection, less
+    noise?".
+    """
+    y, _, probs = cross_val_predict(rows, spec, groups, splitter, clf_name)
+    levels = np.array([int(r["rule_level"]) for r in rows])
+    n_atk = int(y.sum())
+    n_ben = int((y == 0).sum())
+
+    out = []
+    for lvl in sorted(set(levels.tolist())):
+        flag = levels >= lvl
+        tp = int((flag & (y == 1)).sum())
+        fp = int((flag & (y == 0)).sum())
+        if tp == 0:
+            continue
+        base_rec = tp / n_atk
+
+        # cheapest model threshold that does not lose recall
+        best = None
+        for thr in [round(t, 3) for t in np.arange(0.01, 1.0, 0.01)]:
+            mflag = probs >= thr
+            mtp = int((mflag & (y == 1)).sum())
+            if mtp / n_atk >= base_rec:
+                mfp = int((mflag & (y == 0)).sum())
+                if best is None or mfp < best[1]:
+                    best = (thr, mfp, mtp)
+        if best is None:
+            continue
+        thr, mfp, mtp = best
+        out.append({
+            "baseline": f"rule level >= {lvl}",
+            "base_recall": base_rec, "base_fp": fp,
+            "model_threshold": thr, "model_recall": mtp / n_atk, "model_fp": mfp,
+            "fp_reduction": fp - mfp,
+            "fp_reduction_pct": (100.0 * (fp - mfp) / fp) if fp else 0.0,
+            "n_benign": n_ben,
+        })
+    return out
+
+
 def per_fold_variance(rows, spec, groups, splitter, seeds=(42, 7, 1337)):
     """Macro F1 per fold and across seeds. A single number from a single seed is not a result."""
     y = np.array([1 if r["class"] == "attack" else 0 for r in rows])
@@ -529,6 +584,25 @@ def main():
               f"{o['precision']*100:.1f}% of what you open is real, miss {o['missed']}.")
     print("  ⚠️ Both are measured on THIS lab's 72/28 attack/benign mix. A real SOC queue is far more")
     print("     benign-heavy, so precision at any threshold would be substantially lower in production.")
+
+    print("\n" + "=" * 100)
+    print("SUCCESS CRITERION (§3.4) - FALSE POSITIVES AT MATCHED RECALL")
+    print("Detection-only baseline = rank by Wazuh rule level alone. Recall held at the baseline's own.")
+    print("=" * 100)
+    fpr = fp_reduction_vs_severity(rows, dict(FEATURE_SETS["B_no_rule"]), sess, gkf)
+    print(f"{'detection-only baseline':24} {'recall':>7} {'its FPs':>8} | "
+          f"{'model thr':>9} {'recall':>7} {'its FPs':>8} {'FP saved':>9} {'reduction':>10}")
+    for o in fpr:
+        print(f"{o['baseline']:24} {o['base_recall']:7.3f} {o['base_fp']:8} | "
+              f"{o['model_threshold']:9.2f} {o['model_recall']:7.3f} {o['model_fp']:8} "
+              f"{o['fp_reduction']:9} {o['fp_reduction_pct']:9.1f}%")
+    if fpr:
+        head = max(fpr, key=lambda o: o["base_recall"])
+        print(f"\n  ⭐ At the baseline's highest recall ({head['base_recall']*100:.1f}%, "
+              f"'{head['baseline']}'), the model matches that recall with "
+              f"{head['model_fp']} false positives instead of {head['base_fp']} "
+              f"- a {head['fp_reduction_pct']:.1f}% reduction.")
+        print("  Recall is held at or above the baseline's in every row, so no detection is traded away.")
 
     print("\n" + "=" * 100)
     print("FOLD AND SEED VARIANCE - B_no_rule, GroupKFold by window, 3 seeds x 5 folds")
