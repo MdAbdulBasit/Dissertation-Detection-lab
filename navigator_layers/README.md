@@ -19,16 +19,47 @@ set to `showSubtechniques: true`, purely so the matrix will draw their children.
 Those 9 rows are **deliberately unscored** and render uncoloured. They are scaffolding, not
 measurements — scoring them would double-count techniques the study never measured at parent level.
 
-This was a real bug, found only by asking how the file would *render*. Before the fix the layers
-validated perfectly as data — 15 entries, correct scores, correct tactics — and would have displayed
-**five** techniques, because the nine missing parents plus `hideDisabled: true` silently removed ten
-sub-techniques from the matrix. **A figure can be correct in every field it contains and still be wrong
-about what it shows.** No data-level check catches that; only opening it does.
+**The precise mechanism, corrected after actually rendering the layers.** A parent row defaults to
+*collapsed*, and a collapsed parent does not draw its sub-techniques. Without a parent entry carrying
+`showSubtechniques: true`, all ten sub-techniques stay hidden behind an unexpanded arrow and the figure
+shows only the five top-level techniques. Adding the parents fixes it, which the rendered layers confirm.
 
-| File | Setup measured |
-|---|---|
-| `01_default_ruleset.json` | Stock Wazuh 4.14.6, default Sysmon config |
-| `02_custom_ruleset.json` | 37 custom rules; widened Sysmon config for T1112, T1070.004, T1003.001 |
+⚠️ An earlier version of this note additionally blamed `hideDisabled: true`. **That was wrong.**
+`hideDisabled` hides only techniques explicitly marked `enabled: false`; techniques absent from a layer
+default to enabled, so it hides nothing here and the full matrix is drawn either way. The fix was right;
+the reason given for it was not, and it was only caught by opening the file rather than reasoning about
+it. Recorded because it is the same mistake twice in one artefact — **a confident explanation of a
+correct fix is still an unverified claim.**
+
+| File | Setup measured | ATT&CK |
+|---|---|---|
+| `01_default_ruleset.json` | Stock Wazuh 4.14.6, default Sysmon config | **v14 — cite this** |
+| `02_custom_ruleset.json` | 37 custom rules; widened Sysmon config for T1112, T1070.004, T1003.001 | **v14 — cite this** |
+| `01_default_ruleset_v19.json` | *(same data)* | v19 — renders on the live site |
+| `02_custom_ruleset_v19.json` | *(same data)* | v19 — renders on the live site |
+
+## ⚠️ ATT&CK v19 deleted the tactic this study was mapped against
+
+[ATT&CK v19, released 28 April 2026](https://medium.com/mitre-attack/att-ck-v19-the-defense-evasion-split-ics-sub-techniques-new-ai-social-engineering-coverage-ff329cb65d66),
+**split Defense Evasion into Stealth and Defense Impairment** — after data collection had finished.
+Three of the fifteen studied techniques (T1112, T1218.011, T1070.004) are mapped to `defense-evasion`,
+a tactic shortname that no longer resolves. The live Navigator serves v19, so loading the v14 pair there
+triggers a version-migration wizard.
+
+Hence two pairs, from one generator run, scoring identical data:
+
+- **v14, tactics pinned** — the citable figure. Matches the Wazuh rule mappings, `COVERAGE_TABLE.md`
+  and the seven-tactic claim in the write-up. Reproduces the study *as conducted*.
+- **v19, tactics omitted** — loads cleanly today. The `tactic` field is optional; omitted, the Navigator
+  resolves each technique's tactics from its own dataset, so these also survive v20. **Consequence:** a
+  technique belonging to several tactics is highlighted in each, so the *coloured-cell* count exceeds 15
+  while the *distinct-technique* count stays 15. Do not count cells on the v19 layers.
+
+Guessing the new v19 shortnames was rejected as an approach: a wrong guess drops the technique from the
+matrix silently — the same failure mode as the missing parent rows below.
+
+**This is a limitation worth stating in Chapter 4.** A coverage figure is dated the moment the framework
+moves, and ATT&CK moved mid-project. The scores are unaffected; only where they are drawn changed.
 
 ## Scoring — derived from the data, not assigned
 

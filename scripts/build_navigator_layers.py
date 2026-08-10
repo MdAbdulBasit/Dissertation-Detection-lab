@@ -246,10 +246,38 @@ def parent_container_rows(entries):
     return rows
 
 
-def layer_json(name, description, entries):
+def strip_tactics(entries):
+    """
+    ⚠️ ATT&CK v19 (28 April 2026) DELETED the tactic these layers were built against.
+
+    Defense Evasion was split into Stealth and Defense Impairment. Three of the fifteen studied
+    techniques - T1112, T1218.011, T1070.004 - carry `"tactic": "defense-evasion"`, a shortname that no
+    longer resolves. Loading the v14 layers on the live Navigator therefore triggers a migration wizard
+    and renders those three unreliably.
+
+    `tactic` is OPTIONAL in the layer format. Omitted, the Navigator resolves each technique's tactics
+    from whichever ATT&CK dataset it has loaded, so the layer renders correctly on v19 and on whatever
+    replaces it. The cost is that a technique belonging to several tactics is highlighted in each of
+    them - T1053.005 appears under Execution, Persistence AND Privilege Escalation. The COUNT of
+    coloured cells therefore exceeds fifteen in the v19 layers; the count of distinct techniques does
+    not. The v14 pair, with tactics pinned, remains the citable figure for exactly this reason.
+
+    Guessing the new shortnames was the obvious alternative and was rejected: a wrong guess fails
+    silently by dropping the technique from the matrix, which is the same class of bug as the missing
+    parent rows.
+    """
+    out = []
+    for e in entries:
+        e = dict(e)
+        e.pop("tactic", None)
+        out.append(e)
+    return out
+
+
+def layer_json(name, description, entries, attack_version="14"):
     return {
         "name": name,
-        "versions": {"attack": "14", "navigator": "4.9.1", "layer": "4.5"},
+        "versions": {"attack": attack_version, "navigator": "4.9.1", "layer": "4.5"},
         "domain": "enterprise-attack",
         "description": description,
         "techniques": entries,
@@ -290,16 +318,35 @@ def main():
 
     for which, fname, name, desc in specs:
         entries, tally = build_layer(rows, which)
+
+        # v14 - tactics pinned. The citable figure: matches the Wazuh rule mappings, COVERAGE_TABLE.md
+        # and the seven-tactic claim in the write-up. Reproduces the study as conducted.
         path = os.path.join(OUTDIR, fname)
         with open(path, "w", encoding="utf-8") as fh:
-            json.dump(layer_json(name, desc, entries), fh, indent=2)
-        print(f"\n{name}  ->  {path}")
+            json.dump(layer_json(name, desc, entries, "14"), fh, indent=2)
+
+        # v19 - tactics omitted. Renders on the live Navigator without a migration wizard.
+        v19_path = os.path.join(OUTDIR, fname.replace(".json", "_v19.json"))
+        v19_desc = (desc + "  [ATT&CK v19 rendering. Tactic assignments are resolved by the Navigator "
+                    "rather than pinned, because v19 split Defense Evasion into Stealth and Defense "
+                    "Impairment after this study was conducted. Techniques belonging to several "
+                    "tactics are highlighted in each, so the coloured-cell count exceeds 15; the "
+                    "distinct-technique count does not. Cite the v14 layer.]")
+        with open(v19_path, "w", encoding="utf-8") as fh:
+            json.dump(layer_json(name + " (ATT&CK v19)", v19_desc,
+                                 strip_tactics(entries), "19"), fh, indent=2)
+
+        print(f"\n{name}")
+        print(f"   v14 (cite this) -> {path}")
+        print(f"   v19 (renders)   -> {v19_path}")
         for s in (0, 1, 2, 3):
             if tally[s]:
                 names = [e["techniqueID"] for e in entries if e.get("score") == s]
                 print(f"   {s}  {LABEL[s]:28} {tally[s]:2}   {', '.join(names)}")
 
-    print("\nLoad these at https://mitre-attack.github.io/attack-navigator/ (Open Existing Layer > Upload)")
+    print("\nLoad at https://mitre-attack.github.io/attack-navigator/ (Open Existing Layer > Upload)")
+    print("The live site serves ATT&CK v19 - use the _v19 files there. The v14 pair is the archived,")
+    print("citable record and will trigger a version-migration wizard if opened on the live site.")
 
 
 if __name__ == "__main__":
