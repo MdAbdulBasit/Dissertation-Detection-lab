@@ -66,7 +66,33 @@ try:
 except ImportError:
     sys.exit("scikit-learn is required:  pip install scikit-learn --break-system-packages")
 
+try:
+    from xgboost import XGBClassifier
+    HAVE_XGB = True
+except ImportError:
+    HAVE_XGB = False
+
 DATA = os.path.join("data", "labelled_alerts.csv")
+
+
+def make_rf(pos_weight=None):
+    return RandomForestClassifier(n_estimators=300, class_weight="balanced",
+                                  min_samples_leaf=2, random_state=42, n_jobs=-1)
+
+
+def make_xgb(pos_weight=None):
+    # scale_pos_weight is XGBoost's equivalent of class_weight="balanced". Passed explicitly from the
+    # TRAINING fold only - computing it on the full dataset would leak the test fold's class balance.
+    return XGBClassifier(n_estimators=300, max_depth=6, learning_rate=0.1,
+                         subsample=0.9, colsample_bytree=0.9,
+                         scale_pos_weight=(pos_weight or 1.0),
+                         eval_metric="logloss", random_state=42, n_jobs=-1,
+                         tree_method="hist")
+
+
+CLASSIFIERS = {"RandomForest": make_rf}
+if HAVE_XGB:
+    CLASSIFIERS["XGBoost"] = make_xgb
 
 # =====================================================================================================
 # LEAK SANITISATION
@@ -209,7 +235,9 @@ def build_matrix(rows, spec, fit_on=None):
     return (np.hstack(blocks) if blocks else np.zeros((len(rows), 1))), names
 
 
-def evaluate(rows, spec_name, spec, groups, split_name, splitter):
+def cross_val_predict(rows, spec, groups, splitter, clf_name="RandomForest"):
+    """Out-of-fold labels AND probabilities. Every alert is predicted by a model that never saw its
+    window (or its technique, depending on the splitter)."""
     y = np.array([1 if r["class"] == "attack" else 0 for r in rows])
     g = np.array(groups)
     preds = np.zeros(len(rows), dtype=int)
@@ -223,16 +251,21 @@ def evaluate(rows, spec_name, spec, groups, split_name, splitter):
         Xte, _ = build_matrix(test, s, fit_on=train)
         if Xtr.shape[1] != Xte.shape[1]:
             k = min(Xtr.shape[1], Xte.shape[1]); Xtr, Xte = Xtr[:, :k], Xte[:, :k]
-        clf = RandomForestClassifier(n_estimators=300, class_weight="balanced",
-                                     min_samples_leaf=2, random_state=42, n_jobs=-1)
+        n_pos = max(int((y[tr] == 1).sum()), 1)
+        n_neg = max(int((y[tr] == 0).sum()), 1)
+        clf = CLASSIFIERS[clf_name](pos_weight=n_neg / n_pos)
         clf.fit(Xtr, y[tr])
         preds[te] = clf.predict(Xte)
         probs[te] = clf.predict_proba(Xte)[:, 1]
+    return y, preds, probs
 
+
+def evaluate(rows, spec_name, spec, groups, split_name, splitter, clf_name="RandomForest"):
+    y, preds, probs = cross_val_predict(rows, spec, groups, splitter, clf_name)
     rep = classification_report(y, preds, target_names=["benign", "attack"],
                                 output_dict=True, zero_division=0)
     return {
-        "features": spec_name, "split": split_name,
+        "features": spec_name, "split": split_name, "classifier": clf_name,
         "attack_precision": rep["attack"]["precision"], "attack_recall": rep["attack"]["recall"],
         "attack_f1": rep["attack"]["f1-score"],
         "benign_precision": rep["benign"]["precision"], "benign_recall": rep["benign"]["recall"],
@@ -240,6 +273,57 @@ def evaluate(rows, spec_name, spec, groups, split_name, splitter):
         "macro_f1": rep["macro avg"]["f1-score"], "pr_auc": average_precision_score(y, probs),
         "cm": confusion_matrix(y, preds).tolist(),
     }
+
+
+def print_confusion(cm, title):
+    """
+    Confusion matrices, printed rather than buried in the CSV. `evaluate` has always computed one and
+    nothing ever displayed it, so the error BALANCE - which of the two mistakes the model actually makes
+    - was invisible behind a single macro-F1 number. For a triage tool the two errors are not
+    interchangeable: a false negative is a missed intrusion, a false positive is wasted analyst time.
+    """
+    (tn, fp), (fn, tp) = cm
+    print(f"\n   {title}")
+    print(f"      {'':16}{'pred benign':>13}{'pred attack':>13}")
+    print(f"      {'actual benign':16}{tn:>13}{fp:>13}   <- {fp} false alarms")
+    print(f"      {'actual attack':16}{fn:>13}{tp:>13}   <- {fn} MISSED attacks")
+    total = tn + fp + fn + tp
+    print(f"      {tp+fn} attacks, {tn+fp} benign, {total} alerts. "
+          f"Missed {fn/(tp+fn)*100:.1f}% of attacks, false-alarmed on {fp/(tn+fp)*100:.1f}% of benign.")
+
+
+def operating_points(rows, spec, groups, splitter, clf_name="RandomForest"):
+    """
+    ⚠️ THE QUESTION A SOC ACTUALLY ASKS, which macro F1 does not answer.
+
+    A triage model is not deployed at its argmax-F1 threshold. It is deployed at whatever cut-off
+    matches the team's tolerance for missed intrusions, and the operational question is: "if we only
+    review the top N% of alerts, what fraction of real attacks do we still catch?" Reporting a single
+    threshold-0.5 score hides the fact that the same model supports very different trade-offs.
+
+    Reported as WORKLOAD REDUCTION, because that is the claim the dissertation makes: alert
+    prioritisation is worth having only if an analyst can look at meaningfully fewer alerts without
+    meaningfully more misses.
+    """
+    y, _, probs = cross_val_predict(rows, spec, groups, splitter, clf_name)
+    n = len(y)
+    n_atk = int(y.sum())
+    out = []
+    for thr in [round(t, 2) for t in np.arange(0.05, 1.00, 0.05)]:
+        flagged = probs >= thr
+        n_flag = int(flagged.sum())
+        if n_flag == 0:
+            continue
+        tp = int((flagged & (y == 1)).sum())
+        fp = int((flagged & (y == 0)).sum())
+        fn = n_atk - tp
+        prec = tp / n_flag
+        rec = tp / n_atk
+        f1 = 0.0 if prec + rec == 0 else 2 * prec * rec / (prec + rec)
+        out.append({"threshold": thr, "reviewed": n_flag, "reviewed_pct": 100 * n_flag / n,
+                    "tp": tp, "fp": fp, "missed": fn,
+                    "precision": prec, "recall": rec, "f1": f1})
+    return out
 
 
 def rule_baselines(rows):
@@ -395,6 +479,56 @@ def main():
                   f"{r['benign_f1']:7.3f} {r['macro_f1']:8.3f} {r['pr_auc']:7.3f}")
 
     results += rule_baselines(rows)
+
+    # -------------------------------------------------------------------------------------------
+    gkf = GroupKFold(n_splits=5)
+    sess = [r["session_id"] for r in rows]
+
+    print("\n" + "=" * 100)
+    print("CLASSIFIER COMPARISON - B_no_rule, both splits")
+    print("=" * 100)
+    if not HAVE_XGB:
+        print("  xgboost not installed:  pip install xgboost --break-system-packages")
+    print(f"{'classifier':14} {'split':26} {'atk F1':>7} {'ben F1':>7} {'macroF1':>8} {'PR-AUC':>7}")
+    for clf_name in CLASSIFIERS:
+        for split_name, splitter, groups in [
+            ("GroupKFold(5) by window", gkf, sess),
+            ("LeaveOneTechniqueOut", LeaveOneGroupOut(), [r["technique_id"] for r in rows]),
+        ]:
+            r = evaluate(rows, "B_no_rule", dict(FEATURE_SETS["B_no_rule"]),
+                         groups, split_name, splitter, clf_name)
+            r["features"] = f"B_no_rule [{clf_name}]"
+            results.append(r)
+            print(f"{clf_name:14} {split_name:26} {r['attack_f1']:7.3f} {r['benign_f1']:7.3f} "
+                  f"{r['macro_f1']:8.3f} {r['pr_auc']:7.3f}")
+            if split_name.startswith("GroupKFold"):
+                print_confusion(r["cm"], f"Confusion matrix - {clf_name}, B_no_rule, GroupKFold")
+
+    print("\n" + "=" * 100)
+    print("OPERATING POINTS - B_no_rule, RandomForest, GroupKFold by window")
+    print("What a SOC actually needs: review the top N% of alerts, catch what fraction of attacks?")
+    print("=" * 100)
+    ops = operating_points(rows, dict(FEATURE_SETS["B_no_rule"]), sess, gkf)
+    print(f"{'thresh':>7} {'reviewed':>9} {'% of all':>9} {'caught':>7} {'missed':>7} "
+          f"{'precision':>10} {'recall':>8} {'F1':>7}")
+    for o in ops:
+        print(f"{o['threshold']:7.2f} {o['reviewed']:9} {o['reviewed_pct']:8.1f}% {o['tp']:7} "
+              f"{o['missed']:7} {o['precision']:10.3f} {o['recall']:8.3f} {o['f1']:7.3f}")
+
+    # The two cut-offs a SOC would actually argue about, picked from the sweep rather than asserted.
+    hi_rec = [o for o in ops if o["recall"] >= 0.95]
+    hi_prec = [o for o in ops if o["precision"] >= 0.95]
+    print("\n  Two defensible operating points:")
+    if hi_rec:
+        o = max(hi_rec, key=lambda o: o["threshold"])
+        print(f"    MISS-AVERSE  thr {o['threshold']:.2f}: review {o['reviewed_pct']:.1f}% of alerts, "
+              f"catch {o['recall']*100:.1f}% of attacks, miss {o['missed']}.")
+    if hi_prec:
+        o = min(hi_prec, key=lambda o: o["threshold"])
+        print(f"    LOAD-AVERSE  thr {o['threshold']:.2f}: review {o['reviewed_pct']:.1f}% of alerts, "
+              f"{o['precision']*100:.1f}% of what you open is real, miss {o['missed']}.")
+    print("  ⚠️ Both are measured on THIS lab's 72/28 attack/benign mix. A real SOC queue is far more")
+    print("     benign-heavy, so precision at any threshold would be substantially lower in production.")
 
     print("\n" + "=" * 100)
     print("FOLD AND SEED VARIANCE - B_no_rule, GroupKFold by window, 3 seeds x 5 folds")
