@@ -22,9 +22,9 @@ Operations Centre?
 | `BUILD_LOG.md` | How the lab was built; hard-won lessons and rebuild notes |
 | `BUILD_STEPS.md` | Step-by-step build commands |
 | `sigma_rules/` | Detection-as-code artefacts — Sigma `.yml` per technique |
-| `navigator_layers/` | ATT&CK Navigator coverage heatmap JSON |
+| `navigator_layers/` | ATT&CK Navigator layers (v14 citable + v19 renderable) and exported SVG figures |
 | `data/` | Detonation log and exported alert datasets |
-| `ml/` | Random Forest / XGBoost notebook, metrics, plots |
+| `ml/` | Triage model results — Random Forest **and** XGBoost, rule-based baselines, operating points |
 | `evidence/` | Screenshots and raw output for Chapter 4 figures |
 
 ## Lab topology
