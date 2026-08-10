@@ -1,0 +1,164 @@
+{
+  "name": "Detection coverage - STOCK WAZUH 4.14.6",
+  "versions": {
+    "attack": "14",
+    "navigator": "4.9.1",
+    "layer": "4.5"
+  },
+  "domain": "enterprise-attack",
+  "description": "MSc dissertation, Abdul Basit Mohammed (c5038891). Coverage of 15 ATT&CK techniques using the DEFAULT Wazuh ruleset with no customisation, measured over 5 attack and 5 benign detonation windows per technique. Scores are computed from labelled_alerts.csv, not assigned by hand.",
+  "techniques": [
+    {
+      "techniqueID": "T1087.001",
+      "tactic": "discovery",
+      "score": 1,
+      "comment": "PARENT / MISATTRIBUTED  (phase: baseline)\nattack alerts 76 / benign 25\ncarrying T1087.001 exactly: 0 attack, 0 benign\nparent/other-technique rules only: 92031, 92032, 92033",
+      "enabled": true,
+      "showSubtechniques": true
+    },
+    {
+      "techniqueID": "T1082",
+      "tactic": "discovery",
+      "score": 0,
+      "comment": "BLIND  (phase: baseline)\nattack alerts 147 / benign 26\ncarrying T1082 exactly: 0 attack, 0 benign",
+      "enabled": true,
+      "showSubtechniques": true
+    },
+    {
+      "techniqueID": "T1033",
+      "tactic": "discovery",
+      "score": 3,
+      "comment": "DETECTED + DISCRIMINATING  (phase: baseline)\nattack alerts 154 / benign 17\ncarrying T1033 exactly: 19 attack, 0 benign\nrules with exact ID: 92022\n\u26a0\ufe0f PARTIAL COVERAGE. 92022 correctly maps qwinsta session enumeration to T1033, but whoami - the most common way anyone establishes identity - went to T1087+T1059.003 via 92032. The technique is detected for one variant and misattributed for the dominant one.",
+      "enabled": true,
+      "showSubtechniques": true
+    },
+    {
+      "techniqueID": "T1016",
+      "tactic": "discovery",
+      "score": 0,
+      "comment": "BLIND  (phase: baseline)\nattack alerts 49 / benign 16\ncarrying T1016 exactly: 0 attack, 0 benign",
+      "enabled": true,
+      "showSubtechniques": true
+    },
+    {
+      "techniqueID": "T1059.001",
+      "tactic": "execution",
+      "score": 2,
+      "comment": "DETECTED  (phase: baseline)\nattack alerts 61 / benign 15\ncarrying T1059.001 exactly: 46 attack, 15 benign\nrules with exact ID: 92027, 92057, 92070, 92071",
+      "enabled": true,
+      "showSubtechniques": true
+    },
+    {
+      "techniqueID": "T1059.003",
+      "tactic": "execution",
+      "score": 2,
+      "comment": "DETECTED  (phase: baseline)\nattack alerts 45 / benign 15\ncarrying T1059.003 exactly: 30 attack, 15 benign\nrules with exact ID: 92004, 92032, 92052\nparent/other-technique rules only: 92005",
+      "enabled": true,
+      "showSubtechniques": true
+    },
+    {
+      "techniqueID": "T1053.005",
+      "tactic": "persistence",
+      "score": 0,
+      "comment": "BLIND  (phase: baseline)\nattack alerts 32 / benign 31\ncarrying T1053.005 exactly: 0 attack, 0 benign",
+      "enabled": true,
+      "showSubtechniques": true
+    },
+    {
+      "techniqueID": "T1136.001",
+      "tactic": "persistence",
+      "score": 3,
+      "comment": "DETECTED + DISCRIMINATING  (phase: baseline)\nattack alerts 171 / benign 82\ncarrying T1136.001 exactly: 10 attack, 0 benign\nrules with exact ID: 92040\n\u26a0\ufe0f The 10/0 is ARGUMENT ORDER, not intent. 92040 (L12, T1136.001) requires the command line to match `add\\s`. The atomic runs `net user /add NAME PASS` (add + space) and fires it; the mirror runs `net user NAME PASS /add` (add is the last token, no trailing whitespace) and does NOT. The most natural way a human types the command evades a level-12 credential-creation rule and falls back to parent 92039, which calls it 'account discovery'.",
+      "enabled": true,
+      "showSubtechniques": true
+    },
+    {
+      "techniqueID": "T1547.001",
+      "tactic": "persistence",
+      "score": 2,
+      "comment": "DETECTED  (phase: baseline)\nattack alerts 27 / benign 35\ncarrying T1547.001 exactly: 4 attack, 5 benign\nrules with exact ID: 92302",
+      "enabled": true,
+      "showSubtechniques": true
+    },
+    {
+      "techniqueID": "T1112",
+      "tactic": "defense-evasion",
+      "score": 2,
+      "comment": "DETECTED  (phase: baseline)\nattack alerts 55 / benign 41\ncarrying T1112 exactly: 30 attack, 15 benign\nrules with exact ID: 92041\n\u26a0\ufe0f FALSE PRECISION. The exact-ID match comes from 92041, whose regex quantifies every group after /d with * or ?, so it matches ANY `reg add ... /d <anything>` - verified down to `add x /d `. It fired once per reg add issued and asserted T1027 obfuscation in 45 of 45 cases. It is a reg.exe execution counter wearing a base64 detector's description.",
+      "enabled": true,
+      "showSubtechniques": true
+    },
+    {
+      "techniqueID": "T1218.011",
+      "tactic": "defense-evasion",
+      "score": 0,
+      "comment": "BLIND  (phase: baseline)\nattack alerts 32 / benign 24\ncarrying T1218.011 exactly: 0 attack, 0 benign",
+      "enabled": true,
+      "showSubtechniques": true
+    },
+    {
+      "techniqueID": "T1070.004",
+      "tactic": "defense-evasion",
+      "score": 0,
+      "comment": "BLIND  (phase: baseline)\nattack alerts 33 / benign 20\ncarrying T1070.004 exactly: 0 attack, 0 benign",
+      "enabled": true,
+      "showSubtechniques": true
+    },
+    {
+      "techniqueID": "T1560.001",
+      "tactic": "collection",
+      "score": 0,
+      "comment": "BLIND  (phase: baseline)\nattack alerts 10 / benign 16\ncarrying T1560.001 exactly: 0 attack, 0 benign",
+      "enabled": true,
+      "showSubtechniques": true
+    },
+    {
+      "techniqueID": "T1003.001",
+      "tactic": "credential-access",
+      "score": 0,
+      "comment": "BLIND  (phase: baseline)\nattack alerts 5 / benign 4\ncarrying T1003.001 exactly: 0 attack, 0 benign",
+      "enabled": true,
+      "showSubtechniques": true
+    },
+    {
+      "techniqueID": "T1105",
+      "tactic": "command-and-control",
+      "score": 3,
+      "comment": "DETECTED + DISCRIMINATING  (phase: baseline)\nattack alerts 85 / benign 15\ncarrying T1105 exactly: 40 attack, 0 benign\nrules with exact ID: 92074, 92207, 92213, 92227\n\u26a0\ufe0f The 40/0 is specific to THIS mirror. 92074/92207/92227 key on the object (a .exe or .dll) and the destination (Users\\Public); the mirror fetches a .txt to Temp. An administrator downloading a legitimate installer with curl would trip 92074. Genuine intent-encoding, but not a general claim of zero false positives.",
+      "enabled": true,
+      "showSubtechniques": true
+    }
+  ],
+  "gradient": {
+    "colors": [
+      "#c62828",
+      "#ef6c00",
+      "#f9a825",
+      "#2e7d32"
+    ],
+    "minValue": 0,
+    "maxValue": 3
+  },
+  "legendItems": [
+    {
+      "label": "0  Blind - no alert carries the technique or its parent",
+      "color": "#c62828"
+    },
+    {
+      "label": "1  Parent only / misattributed to another technique",
+      "color": "#ef6c00"
+    },
+    {
+      "label": "2  Detected at the correct technique",
+      "color": "#f9a825"
+    },
+    {
+      "label": "3  Detected AND fires zero times on benign activity",
+      "color": "#2e7d32"
+    }
+  ],
+  "showTacticRowBackground": true,
+  "tacticRowBackground": "#205b8f",
+  "selectTechniquesAcrossTactics": false,
+  "hideDisabled": true
+}

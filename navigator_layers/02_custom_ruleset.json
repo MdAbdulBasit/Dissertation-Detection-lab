@@ -1,0 +1,164 @@
+{
+  "name": "Detection coverage - ENGINEERED RULESET",
+  "versions": {
+    "attack": "14",
+    "navigator": "4.9.1",
+    "layer": "4.5"
+  },
+  "domain": "enterprise-attack",
+  "description": "Same 15 techniques after deploying 37 custom Wazuh rules, and for T1112, T1070.004 and T1003.001 a widened Sysmon configuration. Three techniques were deliberately given NO custom rule because the default was already correct.",
+  "techniques": [
+    {
+      "techniqueID": "T1087.001",
+      "tactic": "discovery",
+      "score": 2,
+      "comment": "DETECTED  (phase: custom)\nattack alerts 50 / benign 15\ncarrying T1087.001 exactly: 25 attack, 10 benign\nrules with exact ID: 100200\nparent/other-technique rules only: 92032",
+      "enabled": true,
+      "showSubtechniques": true
+    },
+    {
+      "techniqueID": "T1082",
+      "tactic": "discovery",
+      "score": 2,
+      "comment": "DETECTED  (phase: custom)\nattack alerts 186 / benign 29\ncarrying T1082 exactly: 59 attack, 16 benign\nrules with exact ID: 100230, 100231, 100232, 100233",
+      "enabled": true,
+      "showSubtechniques": true
+    },
+    {
+      "techniqueID": "T1033",
+      "tactic": "discovery",
+      "score": 2,
+      "comment": "DETECTED  (phase: custom)\nattack alerts 152 / benign 15\ncarrying T1033 exactly: 35 attack, 10 benign\nrules with exact ID: 100240, 100241, 92022",
+      "enabled": true,
+      "showSubtechniques": true
+    },
+    {
+      "techniqueID": "T1016",
+      "tactic": "discovery",
+      "score": 2,
+      "comment": "DETECTED  (phase: custom)\nattack alerts 54 / benign 16\ncarrying T1016 exactly: 33 attack, 12 benign\nrules with exact ID: 100250, 100251, 100252",
+      "enabled": true,
+      "showSubtechniques": true
+    },
+    {
+      "techniqueID": "T1059.001",
+      "tactic": "execution",
+      "score": 2,
+      "comment": "DETECTED  (phase: baseline)\nattack alerts 61 / benign 15\ncarrying T1059.001 exactly: 46 attack, 15 benign\nrules with exact ID: 92027, 92057, 92070, 92071\nNO CUSTOM RULE WRITTEN - the default ruleset was already correct here, so writing one would duplicate working detection and inflate the apparent contribution of this project.",
+      "enabled": true,
+      "showSubtechniques": true
+    },
+    {
+      "techniqueID": "T1059.003",
+      "tactic": "execution",
+      "score": 2,
+      "comment": "DETECTED  (phase: baseline)\nattack alerts 45 / benign 15\ncarrying T1059.003 exactly: 30 attack, 15 benign\nrules with exact ID: 92004, 92032, 92052\nparent/other-technique rules only: 92005\nNO CUSTOM RULE WRITTEN - the default ruleset was already correct here, so writing one would duplicate working detection and inflate the apparent contribution of this project.",
+      "enabled": true,
+      "showSubtechniques": true
+    },
+    {
+      "techniqueID": "T1053.005",
+      "tactic": "persistence",
+      "score": 2,
+      "comment": "DETECTED  (phase: custom)\nattack alerts 48 / benign 38\ncarrying T1053.005 exactly: 28 attack, 4 benign\nrules with exact ID: 100270, 100271",
+      "enabled": true,
+      "showSubtechniques": true
+    },
+    {
+      "techniqueID": "T1136.001",
+      "tactic": "persistence",
+      "score": 2,
+      "comment": "DETECTED  (phase: custom)\nattack alerts 169 / benign 56\ncarrying T1136.001 exactly: 55 attack, 14 benign\nrules with exact ID: 100280, 100281, 100282",
+      "enabled": true,
+      "showSubtechniques": true
+    },
+    {
+      "techniqueID": "T1547.001",
+      "tactic": "persistence",
+      "score": 2,
+      "comment": "DETECTED  (phase: custom)\nattack alerts 35 / benign 45\ncarrying T1547.001 exactly: 20 attack, 25 benign\nrules with exact ID: 100290, 100291, 100292, 100294",
+      "enabled": true,
+      "showSubtechniques": true
+    },
+    {
+      "techniqueID": "T1112",
+      "tactic": "defense-evasion",
+      "score": 2,
+      "comment": "DETECTED  (phase: custom-sensor)\nattack alerts 85 / benign 55\ncarrying T1112 exactly: 60 attack, 30 benign\nrules with exact ID: 100260, 100262, 100264\nRequired a SENSOR configuration change as well as rules - the default Sysmon config emitted no usable telemetry for this technique.",
+      "enabled": true,
+      "showSubtechniques": true
+    },
+    {
+      "techniqueID": "T1218.011",
+      "tactic": "defense-evasion",
+      "score": 2,
+      "comment": "DETECTED  (phase: custom)\nattack alerts 30 / benign 15\ncarrying T1218.011 exactly: 11 attack, 7 benign\nrules with exact ID: 100300",
+      "enabled": true,
+      "showSubtechniques": true
+    },
+    {
+      "techniqueID": "T1070.004",
+      "tactic": "defense-evasion",
+      "score": 2,
+      "comment": "DETECTED  (phase: custom-sensor)\nattack alerts 47 / benign 30\ncarrying T1070.004 exactly: 20 attack, 20 benign\nrules with exact ID: 100310, 100311, 100313\nRequired a SENSOR configuration change as well as rules - the default Sysmon config emitted no usable telemetry for this technique.",
+      "enabled": true,
+      "showSubtechniques": true
+    },
+    {
+      "techniqueID": "T1560.001",
+      "tactic": "collection",
+      "score": 2,
+      "comment": "DETECTED  (phase: custom)\nattack alerts 10 / benign 17\ncarrying T1560.001 exactly: 5 attack, 10 benign\nrules with exact ID: 100332",
+      "enabled": true,
+      "showSubtechniques": true
+    },
+    {
+      "techniqueID": "T1003.001",
+      "tactic": "credential-access",
+      "score": 2,
+      "comment": "DETECTED  (phase: custom-sensor)\nattack alerts 16 / benign 10\ncarrying T1003.001 exactly: 11 attack, 5 benign\nrules with exact ID: 100320, 100321\nRequired a SENSOR configuration change as well as rules - the default Sysmon config emitted no usable telemetry for this technique.",
+      "enabled": true,
+      "showSubtechniques": true
+    },
+    {
+      "techniqueID": "T1105",
+      "tactic": "command-and-control",
+      "score": 3,
+      "comment": "DETECTED + DISCRIMINATING  (phase: baseline)\nattack alerts 85 / benign 15\ncarrying T1105 exactly: 40 attack, 0 benign\nrules with exact ID: 92074, 92207, 92213, 92227\nNO CUSTOM RULE WRITTEN - the default ruleset was already correct here, so writing one would duplicate working detection and inflate the apparent contribution of this project.",
+      "enabled": true,
+      "showSubtechniques": true
+    }
+  ],
+  "gradient": {
+    "colors": [
+      "#c62828",
+      "#ef6c00",
+      "#f9a825",
+      "#2e7d32"
+    ],
+    "minValue": 0,
+    "maxValue": 3
+  },
+  "legendItems": [
+    {
+      "label": "0  Blind - no alert carries the technique or its parent",
+      "color": "#c62828"
+    },
+    {
+      "label": "1  Parent only / misattributed to another technique",
+      "color": "#ef6c00"
+    },
+    {
+      "label": "2  Detected at the correct technique",
+      "color": "#f9a825"
+    },
+    {
+      "label": "3  Detected AND fires zero times on benign activity",
+      "color": "#2e7d32"
+    }
+  ],
+  "showTacticRowBackground": true,
+  "tacticRowBackground": "#205b8f",
+  "selectTechniquesAcrossTactics": false,
+  "hideDisabled": true
+}
