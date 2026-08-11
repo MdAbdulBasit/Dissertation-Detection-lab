@@ -347,6 +347,39 @@ Three independent methods agree:
 2. **Rule baselines** — the 37 rules as a triage signal score 0.379, *below* escalating everything.
 3. **Per-rule counts** — 24 of the 34 custom rules that fired also fire on benign administration.
 
+### 8.1 ⭐ T1560.001 — the finding isolated inside a single technique
+
+The cross-technique pairs vary the technique, the sensor and the day. **This one holds all of them
+constant** and varies only what the rule keys on, which makes it the best-controlled comparison in the
+study.
+
+| Detection keys on | Rules | Attack | Benign |
+|---|---|---|---|
+| **Mechanism** — the archiving utility itself | `100330` + `100332` | **5** | **5** |
+| **Object** — whether the command line names a credential store | `100332` alone | **5** | **0** |
+
+Same binary (`makecab.exe`), same technique, same ruleset, same author, same day. The mechanism is
+present in both classes; **only the object separates them.**
+
+**Tier-independent confirmation.** In the **baseline**, before any custom rule existed, vendor rule
+`92032` fired **5 attack / 5 benign** on `makecab.exe`, and the raw telemetry shows `makecab.exe`
+process creations at **5 attack / 5 benign in both phases**. The 5/5 does not depend on our rules or on
+Wazuh's level ordering.
+
+⚠️ **Do not quote the raw per-rule counts.** `100330` reads 0/5 and `100331` reads 0/5, and **neither
+means the rule failed to fire on attacks**:
+
+- **`100330` was displaced** (artefact cause 3). The attack ran `makecab.exe C:\Temp\sam.hiv
+  C:\Temp\art.zip`; `100330` (L8) matched it, but `100332` (L12) matched the same event and outranks it.
+  Hence the summed row above.
+- **`100331` is mirror scope** (artefact cause 1, in the *opposite* direction to the study's other
+  cause-1 rules). The mirror archives twice per run — `makecab` **and** `powershell Compress-Archive` —
+  while the atomic only ever runs `makecab`. `100331` could not have fired on the attack under any
+  ruleset, so it says nothing about discrimination.
+
+Presenting either 0/5 as evidence of discrimination would commit precisely the error the artefact
+taxonomy in `COVERAGE_TABLE.md` exists to prevent — conflating cause (3) or (1) with cause (4).
+
 ---
 
 ## 9. Limitations
