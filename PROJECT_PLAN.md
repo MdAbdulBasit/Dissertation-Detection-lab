@@ -1,8 +1,21 @@
 # PROJECT PLAN
 
-**Last updated:** end of session 2026-08-06
-**Status:** 2 of 15 techniques complete · 5 custom rules deployed · 1,000-alert labelled dataset
-**Committed:** `a7265c6` pushed to `origin/main`
+**Last updated:** 2026-08-10 — **ALL EXPERIMENTAL WORK COMPLETE.**
+**Status:** **15 of 15 techniques · 7 of 7 tactics · 37 custom rules · 278 usable windows ·
+2,683 labelled in-window alerts · Navigator layers and triage model complete.**
+
+> ⚠️ **Everything below this banner describes the project as it stood on 2026-08-06, when 2 of 15
+> techniques were done.** It is retained deliberately as a record of what was *planned* against what
+> was *found* — the predictions in it are pre-registration and must not be edited retrospectively.
+> **For current results use [`CHAPTER4_HANDOVER.md`](CHAPTER4_HANDOVER.md)**, then `COVERAGE_TABLE.md`,
+> `ml/README.md` and `navigator_layers/README.md`.
+>
+> Two figures in the text below are **superseded and not reproducible from the committed dataset**:
+> the *3,217 alerts / ~14% deliberate* figure (a two-technique snapshot — the final export retains
+> 4,976 alerts, 2,683 of them in-window) and any per-technique count, all of which were re-measured.
+
+**Original header, 2026-08-06:** 2 of 15 techniques complete · 5 custom rules deployed ·
+1,000-alert labelled dataset · committed `a7265c6`.
 
 ---
 
@@ -166,6 +179,6 @@ classes and none exclusive to benign**, and rule 100200 fires 25 times on attack
 Rule logic provably cannot separate the classes. That is the measured warrant for the ML triage layer — the
 central claim of the dissertation, now backed by data rather than argument.
 
-Supporting figure: of 3,217 alerts collected, **roughly 14% relate to anything anyone deliberately did.**
+Supporting figure: of 3,217 alerts collected, **roughly 14% relate to anything anyone deliberately did.** ⚠️ **SUPERSEDED 2026-08-10 — do not cite.** This was measured over two techniques and cannot be recomputed: `labelled_alerts.csv` is a filtered export, not raw SIEM volume, and the study-period total was never recorded. The reproducible replacement is rule `92213` — level 15, the maximum severity Wazuh can assign — firing **115 times across the retained dataset with exactly 5 true detections (4.3% useful)**.
 The rest is vulnerability inventory, SCA policy scans, PowerShell's own housekeeping and the monitoring
 agent watching itself.

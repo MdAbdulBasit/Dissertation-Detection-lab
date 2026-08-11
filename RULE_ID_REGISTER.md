@@ -1,5 +1,21 @@
 # RULE-ID REGISTER
 
+> ## ✅ FINAL — 2026-08-10. All 15 techniques complete, 37 rules deployed and measured.
+>
+> **Deployed:** `100200` · `100230–100233` · `100240–100241` · `100250–100252` · `100260–100264` ·
+> `100270–100271` · `100280–100283` · `100290–100292`, `100294` · `100300–100302` · `100310–100313` ·
+> `100320–100321` · `100330–100332`. `100293` retired as unreachable, ID left reserved.
+>
+> **Three techniques deliberately have no rule** — T1059.001, T1059.003 and T1105 — because the default
+> ruleset was already correct. T1105's default is also the only *discriminating* vendor detection in the
+> study. Writing rules there would have duplicated working detection and inflated the apparent
+> contribution of this project.
+>
+> ⚠️ **This file was stale until 2026-08-10**, showing five technique blocks as "Not started" and four
+> as "Written, not yet deployed" when every one had been deployed and measured. It contradicted
+> `COVERAGE_TABLE.md` for several days. Predictions recorded *before* each run are retained below —
+> they are the pre-registration and must not be edited retrospectively.
+
 **Purpose:** Wazuh silently ignores duplicate rule IDs — it uses the FIRST occurrence and logs
 `WARNING (7612): Rule ID 'X' is duplicated`. Detection then appears to "not work" for no visible
 reason. This register pre-allocates a block per technique so IDs are never guessed.
@@ -44,20 +60,20 @@ sudo systemctl restart wazuh-manager
 | 100200–100209 | T1087.001 Local Account Discovery | Discovery | 1 | **100200** | ✅ Deployed — see note 1 |
 | 100210–100219 | T1059.001 PowerShell | Execution | 1 | **none** | ✅ **NO RULE NEEDED — default is correct. See note 5** |
 | 100220–100229 | T1059.003 Windows Command Shell | Execution | 1 | **none** | ✅ **NO RULE NEEDED — default is correct. See note 6** |
-| 100230–100239 | T1082 System Information Discovery | Discovery | 1 | **100230, 100231, 100232, 100233** | 🟡 Written, not yet deployed — see note 2 |
-| 100240–100249 | T1033 System Owner/User Discovery | Discovery | 1 | **100240, 100241** | 🟡 Written, not yet deployed — see note 3 |
-| 100250–100259 | T1016 Network Config Discovery | Discovery | 1 | **100250, 100251, 100252** | 🟡 Written, not yet deployed — see note 4 |
+| 100230–100239 | T1082 System Information Discovery | Discovery | 1 | **100230, 100231, 100232, 100233** | ✅ **Deployed and measured** — see note 2 |
+| 100240–100249 | T1033 System Owner/User Discovery | Discovery | 1 | **100240, 100241** | ✅ **Deployed and measured** — see note 3 |
+| 100250–100259 | T1016 Network Config Discovery | Discovery | 1 | **100250, 100251, 100252** | ✅ **Deployed and measured** — see note 4. ⚠️ `100251`/`100252` are attack-only because of **mirror scope**, not detection quality — exclude from separability claims |
 | 100260–100269 | **T1112 Modify Registry** *(reallocated — see below)* | Defense Evasion | **13 + 1** | **100260, 100261, 100262, 100263, 100264** | ✅ Deployed + measured over **three** phases 2026-08-08 — notes 10, 10a, 10b, 10c |
-| 100270–100279 | T1053.005 Scheduled Task | Persistence | 1 | **100270, 100271** | 🟡 Written, not yet deployed — see note 7 |
+| 100270–100279 | T1053.005 Scheduled Task | Persistence | 1 | **100270, 100271** | ✅ **Deployed and measured** — see note 7 |
 | 100280–100289 | T1136.001 Create Local Account | Persistence | 1 / **Security 4720** | **100280, 100281, 100282, 100283** | ✅ Deployed + smoke-tested 2026-08-08 — see note 8 |
 | 100290–100299 | **T1547.001 Registry Run Keys** *(reallocated — see below)* | Persistence | **13 + 11** | **100290, 100291, 100292, 100294** · ~~100293 retired, ID reserved~~ | ✅ Deployed + measured 2026-08-08 — notes 9, 9a, 9b |
-| 100300–100309 | T1218.011 Rundll32 | Defense Evasion | 1 | — | Not started |
-| 100310–100319 | T1070.004 File Deletion | Defense Evasion | 11/23 | — | Not started |
-| 100320–100329 | T1003.001 LSASS Memory | Credential Access | 10 | — | Not started |
-| 100330–100339 | T1560.001 Archive via Utility | Collection | 1/11 | — | Not started |
-| 100340–100349 | T1105 Ingress Tool Transfer | Command & Control | 3 | — | Not started |
-| 100350–100359 | T1003.002 SAM Registry Dump | Credential Access | 1/13 | — | Fallback for T1003.001 |
-| 100360–100369 | T1552.001 Credentials in Files | Credential Access | 1 | — | Fallback for T1003.001 |
+| 100300–100309 | T1218.011 Rundll32 | Defense Evasion | 1 | **100300, 100301, 100302** | ✅ **Deployed and measured** |
+| 100310–100319 | T1070.004 File Deletion | Defense Evasion | **1 + 26** | **100310, 100311, 100312, 100313** | ✅ **Deployed and measured** — required a Sysmon schema fix (`4.50` → `4.90`); `100312`/`100313` both carry an `svchost.exe` negation for Prefetch housekeeping |
+| 100320–100329 | T1003.001 LSASS Memory | Credential Access | 10 | **100320, 100321** | ✅ **Deployed and measured** — required widening Sysmon to emit EID 10 |
+| 100330–100339 | T1560.001 Archive via Utility | Collection | 1/11 | **100330, 100331, 100332** | ✅ **Deployed and measured** — ⚠️ `100330`/`100331` fire **0 attack / 5 benign each**; only `100332` discriminates (5/0) |
+| 100340–100349 | T1105 Ingress Tool Transfer | Command & Control | 3 | **none** | ✅ **NO RULE NEEDED — the default ruleset is correct AND discriminating.** The only such technique in the study; writing rules here would duplicate working detection |
+| 100350–100359 | T1003.002 SAM Registry Dump | Credential Access | 1/13 | — | **Not used** — reserved as a fallback; T1003.001 succeeded, so the fallback was never invoked |
+| 100360–100369 | T1552.001 Credentials in Files | Credential Access | 1 | — | **Not used** — reserved as a fallback; T1003.001 succeeded, so the fallback was never invoked |
 | 100370+ | *unallocated* | | | | Reserve |
 
 ---

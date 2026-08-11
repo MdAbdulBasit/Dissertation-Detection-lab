@@ -50,14 +50,35 @@ Custom rules: `/var/ossec/etc/rules/local_rules.xml` on Blue
 
 ## Progress
 
-**Phase 1 — lab build: complete.** All three VMs operational, attack → Sysmon → agent → SIEM pipeline
-verified end to end.
+## ✅ ALL PHASES COMPLETE — 2026-08-10. Only the write-up remains.
 
-**Phase 2 — detection engineering: 1 of 15 techniques complete.**
-T1087.001 fires custom rule 100200 (L10, sub-technique mapped) alongside default 92031 (L3, parent
-only). That side-by-side is the dissertation's core argument in miniature.
+**Start here:** [`CHAPTER4_HANDOVER.md`](CHAPTER4_HANDOVER.md) — every result, every figure, every
+open decision, in one document.
 
-**Phase 3 — ML alert prioritisation: not started.** Blocked on data collection.
+**Phase 1 — lab build: complete.** Three VMs, attack → Sysmon → agent → SIEM verified end to end.
+
+**Phase 2 — detection engineering: 15 of 15 techniques, 7 of 7 tactics, 37 custom rules.**
+278 usable detonation windows of 344 logged, 66 superseded with a written reason. 2,683 labelled
+in-window alerts (1,919 attack / 764 benign) from 4,976 retained. Eight distinct default-ruleset
+failure modes characterised.
+
+**Phase 3 — ML alert prioritisation: complete.** Random Forest reaches macro F1 **0.784 ± 0.071**
+with rule identity withheld, against **0.428** for the best rule-based heuristic. Cross-validated by
+detonation window; XGBoost matches it to 0.004.
+
+### The headline findings
+
+| | |
+|---|---|
+| Coverage | Blind techniques **7 → 0** after 37 rules |
+| Discrimination | Detections that never fire on benign activity **3 → 1** |
+| Rules as a triage signal | **0.379** macro F1 — *below* the 0.417 for escalating everything |
+| Perfect ATT&CK attribution as a triage signal | **0.412** — also below escalating everything |
+| §3.4 criterion (FP reduction at matched recall) | **99.7%** — 605 false positives → 2 |
+| Realistic workload saving at 99% recall | **~15%** |
+
+**The convergent finding:** across fifteen techniques, every rule that separated attacker from
+administrator encoded *what was done to what*; every rule that failed encoded *how*.
 
 Scope: 15 techniques across 7 tactics and 5 Sysmon event types, approved with supervisor.
 Deadline **1 September 2026**.
