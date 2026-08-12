@@ -4,8 +4,10 @@
 **Prepared 2026-08-10.** Everything below is regenerated from committed artefacts, not transcribed.
 
 > **Purpose.** This document answers the checklist from the writing session and states, item by item,
-> what exists, what is verified, what is stale, and what still needs a decision. **Three things need
-> your judgement before drafting** — they are collected in §11 and flagged ⚠️ inline.
+> what exists and how it was verified. **All three open decisions are now RESOLVED** — the failure-mode
+> taxonomy is fixed at eight, the alert-fatigue figure is `92213` at 115/5, and the FP-reduction result
+> leads with the mechanism. See §11. **Nothing here is awaiting your judgement; the remaining work is
+> selection — deciding what fits a 2,000–2,500 word chapter.**
 
 ---
 
@@ -33,10 +35,10 @@
 
 | Requested | Status | Where |
 |---|---|---|
-| The eight failure modes described | ⚠️ **Present but the COUNT is inconsistent** — see §3 | `COVERAGE_TABLE.md` |
+| The eight failure modes described | ✅ **Locked at eight**, each with its own evidence row — §3 | `COVERAGE_TABLE.md` |
 | The sensor-ceiling result | ✅ Complete, three techniques | §4 |
 | Coverage table | ✅ Complete, all 15 rows. **Summary counters were stale, fixed today** | `COVERAGE_TABLE.md` |
-| Dataset stats incl. the ~14% figure | ⚠️ Stats ✅ — **the ~14% figure is NOT reproducible**, see §5 | §5 |
+| Dataset stats incl. the ~14% figure | ✅ Stats verified. **~14% dropped; replaced by `92213` 115/5** — §5.2 | §5.2 |
 | ML metrics with the robustness check | ✅ Complete, and stronger than required | §6 |
 | Limitations material | ✅ Complete | §9 |
 | *Your guidance:* robustness without rule-ID/path features | ✅ **Done — performance holds.** §6.2 | `ml/README.md` |
@@ -50,11 +52,11 @@
 
 ## 3. The default-ruleset failure modes
 
-⚠️ **DECISION NEEDED — the repository contains three different counts.** `COVERAGE_TABLE.md` says
-*"seven failure modes"* in one place and *"the most insidious of the five"* in another; your session
-notes say eight. The modes below are each individually evidenced; **the taxonomy needs collapsing to one
-canonical list before drafting.** My recommendation is the eight in bold, treating "partial coverage" as
-a variant of sibling misattribution and folding "latent coverage" into the sensor ceiling.
+✅ **RESOLVED — the taxonomy is fixed at EIGHT and this table is canonical.** The repository previously
+said five, seven and eight in different places; `COVERAGE_TABLE.md` still says *"seven failure modes"*
+in one place and *"the most insidious of the five"* in another, both of which are superseded by this
+list. "Partial coverage" is treated as a variant of sibling misattribution and "latent coverage" is
+folded into the sensor ceiling (§4). Each of the eight has its own distinct mechanism and evidence.
 
 | # | Failure mode | What it means | Evidence |
 |---|---|---|---|
@@ -141,27 +143,48 @@ Contrast with **T1070.004**, where `100310`/`100311` read the EID 1 command line
 **"24 of 34 custom rules fire on benign administrator activity too" is the strongest single sentence
 available for the ML argument.** The older documents say "8 of 12" — that was true when written.
 
-### 5.2 ⚠️ The ~14% figure cannot be reproduced — decision needed
+### 5.2 ✅ RESOLVED — the alert-fatigue statistic, and what replaced the ~14% figure
+
+**Decision: the ~14% figure is dropped. Rule `92213` replaces it.** Use the statistic below.
+
+#### ⭐ The alert-fatigue result, in one number
+
+> **Rule `92213` — level 15, the maximum severity Wazuh can assign — fires 115 times across the
+> retained dataset. Exactly 5 of those are genuine detections of the technique it is mapped to.
+> 4.3% useful.**
+
+Full breakdown, recomputable from `data/labelled_alerts.csv` in one line:
+
+| `92213` alerts | Count | What they are |
+|---|---|---|
+| **Genuine T1105 detections** | **5** | The only correct firings, in T1105 attack windows |
+| Outside any detonation window | 84 | Neither class; nobody was doing anything deliberate |
+| Benign mirror | 21 | 10 T1070.004 baseline · 10 T1070.004 custom-sensor · 1 T1053.005 |
+| T1059.003 attack windows | 5 | Attack class, but T1105 is not the technique under test |
+| **Total** | **115** | |
+
+The rule's description is *"Executable file dropped in folder commonly used by malware."* It is a
+maximum-severity alert that is **wrong 96% of the time**, and an analyst working strictly top-down by
+severity would open all 115.
+
+⚠️ **A previous version of this section proposed `92213` at "551 fires, 5 detections". That figure is
+not reproducible** — it predates the exporter's OS-background filters and was carried forward from
+`COVERAGE_TABLE.md`'s summary-counter row. **It had exactly the same defect as the ~14% figure it was
+meant to replace**, which is why every number in this document is now recomputed at the point of use.
+
+#### Why ~14% had to go
 
 The claim *"of 3,217 alerts collected, roughly 14% relate to anything anyone deliberately did"* comes
-from `PROJECT_PLAN.md` and dates from a snapshot when **only two techniques had been measured**. It
-cannot be recomputed:
+from `PROJECT_PLAN.md` and dates from a snapshot when **only two techniques had been measured**:
 
 - `labelled_alerts.csv` is the **filtered export** (alerts near windows, minus OS-background artefacts),
-  not the raw SIEM volume. Its in-window share is **53.9%**, which is a different quantity.
+  not raw SIEM volume. Its in-window share is **53.9%** — a different quantity, not a corrected one.
 - `alert_counts.csv` is a per-rule breakdown of the same 4,976 alerts, not total SIEM volume.
 - The total alert count for the full study period was never recorded.
 
-**Three options:**
-
-1. **Drop the claim.** Safest.
-2. **Restate to what is measurable:** *"Of 4,976 alerts retained around detonation windows, 2,683 (53.9%)
-   fall inside one; the remainder is vulnerability inventory, SCA policy scans, PowerShell housekeeping
-   and the agent monitoring itself."* Defensible, weaker, different claim.
-3. **Re-derive** from the Wazuh indices if the study-period alert volume is still retrievable.
-
-**Recommendation: option 2**, with the qualitative observation (most alerts are noise) kept and the
-precise percentage dropped. Do **not** carry 14% forward — it describes a two-technique dataset.
+If a proportion is wanted alongside `92213`, the defensible phrasing is: *"of 4,976 alerts retained
+around detonation windows, 2,683 (53.9%) fall inside one; the remainder is vulnerability inventory, SCA
+policy scans, PowerShell housekeeping and the agent monitoring itself."* **Do not carry 14% forward.**
 
 ---
 
@@ -477,16 +500,19 @@ never "none".**
 
 ---
 
-## 11. ⚠️ Three decisions needed before drafting
+## 11. ✅ All three decisions RESOLVED — nothing is open
 
-1. **The failure-mode count.** Repo says five, seven, and eight in different places. §3 proposes a
-   canonical eight. **Pick one and make the documents agree.**
-2. **The ~14% figure.** Not reproducible (§5.2). Recommend restating as 53.9% of retained alerts, or
-   dropping the number and keeping the qualitative point.
-3. **Which FP-reduction number leads.** 99.7% at matched recall (§6.6) is the §3.4 criterion and is
-   correct. ~15% workload saving at 99% recall is the deployable reality. **Recommend leading with the
-   criterion result and immediately qualifying with the operating-point table** — leading with 99.7%
-   alone will read as overclaiming.
+| # | Decision | Resolution |
+|---|---|---|
+| 1 | **Failure-mode count** — repo said five, seven and eight in different places | ✅ **Eight.** The taxonomy in §3 is canonical; each mode has its own evidence row. All documents reconciled. |
+| 2 | **The ~14% figure** — not reproducible | ✅ **Dropped.** Replaced by rule `92213`: **115 fires at level 15, 5 genuine detections, 4.3% useful** (§5.2, with full breakdown). |
+| 3 | **Which FP-reduction number leads** | ✅ **Lead with the mechanism, not the number.** Open with *why* the baseline is weak — severity ≥ 4 flags 79.2% of benign against 69.1% of attack, and level 15 is 32.3% attack — so the **99.7%** reads as a measurement of the baseline rather than a boast. **Then immediately give the operating-point table and the confusion matrix**, showing the ~15% realistic saving and the 24.5% miss rate at the default threshold. |
+
+**Nothing in this document is awaiting a decision.** Everything below is settled and recomputed.
+
+⚠️ **The only residual risk is infrastructural, not analytical** — see §9.0. Three of the seven silent
+failures catalogued there cannot be caught by `check_docs.py` and are only reachable by rendering the
+output and looking at it.
 
 ---
 
