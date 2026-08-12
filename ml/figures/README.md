@@ -19,6 +19,35 @@ SVG, because they go into Word and get resized.
 | 4 | `fig4_operating_points.svg` | **Recall against analyst workload** — the deployability figure |
 | 5 | `fig5_severity_vs_truth.svg` | **Severity is anti-correlated with ground truth** |
 | 6 | `fig6_rule_baselines.svg` | Model vs the ruleset it supplements, against "escalate everything" |
+| **7** | `fig7_coverage_comparison.svg` | **Coverage, default vs engineered — the readable replacement for the Navigator matrix** |
+| **8** | `fig8_intent_vs_mechanism.svg` | ⭐ **The convergent finding — three matched mechanism/object pairs** |
+
+## ⭐ Figures 7 and 8 are the two that carry the argument
+
+**Figure 7 replaces the Navigator screenshot for the chapter.** The exported layers render roughly 600
+enterprise techniques in order to show 15; at A4 the technique labels are under 1 pt and the finding —
+7 blind → 0, 3 discriminating → 1 — is invisible in the figure meant to carry it. Figure 7 shows the 15
+measured techniques only, grouped by tactic, in two panels, with the four score levels as **discrete
+labelled swatches** rather than a continuous 0–3 gradient (values like 0.43 and 1.7 do not exist in the
+data). **The full-matrix SVGs in `navigator_layers/figures/` remain the appendix evidence and the JSON
+remains the citable artefact** — they are the coverage claim; figure 7 is how a reader sees it.
+
+**Figure 8 is the study's central claim, which previously had no visual at all.** Three pairs where the
+same technique, sensor, author and day produce opposite results depending only on what the rule matches:
+
+| Technique | Mechanism-keyed | Object-keyed |
+|---|---|---|
+| T1003.001 | `100320` **5 / 5** | `100321` **6 / 0** |
+| T1112 | `100262` **10 / 10** | `100260` **20 / 0** |
+| T1070.004 | `100310` **10 / 10** | `100311` **5 / 0** |
+
+Counts are computed **in each technique's own windows**. ⚠️ `100310` additionally fires 9 benign alerts
+inside T1003.001 windows, so its dataset-wide figure is **10 / 19** — the mechanism rule is worse than
+the pair alone suggests, and only the within-technique count is a fair comparison.
+
+T1003.001 is the strongest single data point in the study: the benign mirror runs a **character-identical
+command line**, so nothing in the command line can separate the classes and only the sensor's
+access-mask field does.
 
 ## Which figures carry the argument
 

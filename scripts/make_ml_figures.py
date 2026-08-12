@@ -21,6 +21,7 @@ OUTPUT - SVG, because these go into a Word document and get resized.
 import importlib.util
 import os
 import sys
+import textwrap
 
 import numpy as np
 
@@ -147,10 +148,16 @@ def fig_feature_importance(tm, rows, top_n=18):
                        Patch(color=GREY, label="mixed"),
                        Patch(color=BEN, label="≤45% attack (benign-leaning)")],
               fontsize=8, loc="lower right", frameon=False)
-    fig.text(0.5, -0.02,
+    fig.text(0.5, -0.015,
              "Every top feature is mixed-class. Before sanitisation the leaders were "
              "'calc exe' at 100% attack and 'noprofile command' at 2.1% — both harness artefacts.",
              ha="center", fontsize=8, style="italic", color="#444")
+    if any("parent: (none" in pretty(names[i]) for i in idx):
+        fig.text(0.5, -0.055,
+                 "'parent: (none recorded)' is a real value, not missing data: Wazuh emits no "
+                 "ParentImage for registry, file and process-access events (Sysmon EID 10/11/13/26), "
+                 "so the feature marks event type rather than lineage.",
+                 ha="center", fontsize=7.5, style="italic", color="#666")
     save(fig, "fig2_feature_importance.svg")
 
 
@@ -171,7 +178,10 @@ def fig_pr_curve(y, probs, baselines):
     clusters = []
     for b in sorted(baselines, key=lambda z: -z["recall"]):
         for c in clusters:
-            if abs(c["recall"] - b["recall"]) < 0.03 and abs(c["precision"] - b["precision"]) < 0.03:
+            # ⚠️ Cluster only to avoid OVERPLOTTED MARKERS. Merging the LABELS implied severity>=6
+            # and severity>=8 are one heuristic; they are two, and a reader comparing thresholds needs
+            # to see both. Each keeps its own legend entry; only the marker position is shared.
+            if abs(c["recall"] - b["recall"]) < 0.012 and abs(c["precision"] - b["precision"]) < 0.012:
                 c["labels"].append(b["label"])
                 break
         else:
@@ -183,9 +193,14 @@ def fig_pr_curve(y, probs, baselines):
     # clustered points cannot be made collision-proof by hand; a legend can.
     marks = ["o", "s", "^", "D", "v", "P"]
     for k, c in enumerate(clusters):
+        # ⚠️ When two heuristics land on the same point, say so explicitly rather than printing a
+        # slash-joined label that reads as one heuristic. severity>=6 and >=8 differ by 0.008 recall
+        # and 0.001 precision - that they are indistinguishable IS a finding (almost no alert sits at
+        # level 5-7), and the legend should state it rather than obscure it.
+        lab = [x.replace(">=", "≥") for x in c["labels"]]
+        txt = lab[0] if len(lab) == 1 else " and ".join(lab) + "  (identical point)"
         ax.scatter(c["recall"], c["precision"], s=78, color=RULE, zorder=5,
-                   marker=marks[k % len(marks)], edgecolor="white", linewidth=1.2,
-                   label=" / ".join(c["labels"]).replace(">=", "≥"))
+                   marker=marks[k % len(marks)], edgecolor="white", linewidth=1.2, label=txt)
 
     style(ax, "Precision–recall — model vs rule-based triage",
           xlabel="Recall (share of real attacks caught)", ylabel="Precision")
@@ -254,14 +269,20 @@ def fig_severity(rows):
     cols = [ATK if p >= 70 else (BEN if p < 50 else GREY) for p in pct]
     ax2.bar(x, pct, color=cols, alpha=0.9, width=0.66)
     ax2.axhline(71.5, color="#111", linestyle="--", linewidth=1.3)
+    # ⚠️ A percentage axis must stop at 100. The previous version ran to 126 to make room for the
+    # base-rate caption, which reads as a plotting error on an axis that cannot exceed 100.
+    # Caption moved outside the axes instead; bar labels placed BELOW the bar top where a label at
+    # p+2.5 would otherwise collide with the 71.5% base-rate line (levels 4, 8 and 10 all sit within
+    # 6 points of it).
+    ax2.set_ylim(0, 100)
     for xi, p in zip(x, pct):
-        ax2.text(xi, p + 2.5, f"{p:.0f}%", ha="center", fontsize=7.5, color="#333")
+        inside = abs(p - 71.5) < 8 or p > 92
+        ax2.text(xi, p - 6 if inside else p + 2.5, f"{p:.0f}%", ha="center", fontsize=7.5,
+                 color="white" if inside else "#333",
+                 fontweight="bold" if inside else "normal")
     style(ax2, "", xlabel="Wazuh rule level", ylabel="% attack")
-    # ⚠️ ylim headroom is deliberate. The base-rate caption previously sat at y=74 on the right and
-    # collided with the level-10 bar's own label, which the render log could not have shown.
-    ax2.set_ylim(0, 126)
-    ax2.text(-0.45, 114, "- - -  dataset base rate: 71.5% attack",
-             fontsize=7.5, ha="left", color="#111")
+    ax2.annotate("- - - dataset base rate: 71.5% attack", xy=(0, 1.04), xycoords="axes fraction",
+                 fontsize=7.5, ha="left", va="bottom", color="#111")
     ax2.set_xticks(x); ax2.set_xticklabels(levels)
 
     fig.text(0.5, -0.02,
@@ -283,8 +304,13 @@ def fig_baselines(bars):
     ax.barh(y, vals, color=cols, alpha=0.92, height=0.66)
     ax.set_yticks(y); ax.set_yticklabels(labels, fontsize=9)
     ax.invert_yaxis()
+    # ⚠️ A label at v+0.008 lands on the 0.417 "escalate everything" line for any bar scoring
+    # 0.37-0.42 - which is three of the six. Those are drawn inside the bar instead.
     for yi, v in zip(y, vals):
-        ax.text(v + 0.008, yi, f"{v:.3f}", va="center", fontsize=8.5, fontweight="bold")
+        clash = abs(v - 0.417) < 0.055
+        ax.text(v - 0.012 if clash else v + 0.008, yi, f"{v:.3f}",
+                va="center", ha="right" if clash else "left", fontsize=8.5, fontweight="bold",
+                color="white" if clash else "#111")
     ax.axvline(0.417, color="#111", linestyle="--", linewidth=1.3)
     # ⚠️ Anchored ABOVE the top bar, not below the bottom one. Placed at the bottom it ran into the
     # x-axis and the caption became unreadable - invisible in the render log, visible only on inspection.
@@ -300,6 +326,181 @@ def fig_baselines(bars):
              "attribution (0.412) does not help prioritisation.",
              ha="center", fontsize=8, style="italic", color="#444", wrap=True)
     save(fig, "fig6_rule_baselines.svg")
+
+
+# =========================================================================================
+# The 15 studied techniques, in tactic order. Mirrors build_navigator_layers.py.
+TECHNIQUES = [
+    ("T1087.001", "Local Account Discovery", "Discovery"),
+    ("T1082", "System Information Discovery", "Discovery"),
+    ("T1033", "System Owner/User Discovery", "Discovery"),
+    ("T1016", "Network Config Discovery", "Discovery"),
+    ("T1059.001", "PowerShell", "Execution"),
+    ("T1059.003", "Windows Command Shell", "Execution"),
+    ("T1053.005", "Scheduled Task", "Persistence"),
+    ("T1136.001", "Create Local Account", "Persistence"),
+    ("T1547.001", "Registry Run Keys", "Persistence"),
+    ("T1112", "Modify Registry", "Defense Evasion"),
+    ("T1218.011", "Rundll32", "Defense Evasion"),
+    ("T1070.004", "File Deletion", "Defense Evasion"),
+    ("T1560.001", "Archive via Utility", "Collection"),
+    ("T1003.001", "LSASS Memory", "Credential Access"),
+    ("T1105", "Ingress Tool Transfer", "Command & Control"),
+]
+
+SCORE_COLOURS = ["#c0392b", "#e67e22", "#f1c40f", "#1e8449"]
+SCORE_LABELS = [
+    "0  Blind — no alert carries the technique or its parent",
+    "1  Parent only / misattributed to another technique",
+    "2  Detected at the correct technique",
+    "3  Detected AND fires zero times on benign activity",
+]
+
+
+def fig_coverage_grid():
+    """
+    ⚠️ REPLACES THE ENTERPRISE-MATRIX SCREENSHOT FOR THE CHAPTER.
+
+    The Navigator layers render ~600 techniques to display 15. At A4 the technique labels are under
+    1pt and the finding — 7 blind to 0, 3 discriminating to 1 — is invisible in the figure meant to
+    carry it. The full-matrix SVGs remain in navigator_layers/figures/ as appendix evidence and the
+    JSON is still the citable artefact; this is the version a reader can actually read.
+
+    Scores come from build_navigator_layers.py so the two cannot disagree.
+    """
+    spec = importlib.util.spec_from_file_location(
+        "nav", os.path.join(HERE, "build_navigator_layers.py"))
+    nav = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(nav)
+    cwd = os.getcwd()
+    os.chdir(ROOT)
+    try:
+        rows = nav.load()
+        panels = []
+        for which in ("default", "custom"):
+            scores = {}
+            for tid, _tac in nav.TECHNIQUES:
+                phase = "baseline" if which == "default" else nav.FINAL_PHASE.get(tid, "custom")
+                scores[tid] = nav.score_phase(rows, tid, phase)[0]
+            panels.append(scores)
+    finally:
+        os.chdir(cwd)
+
+    fig, axes = plt.subplots(1, 2, figsize=(11.4, 6.6))
+    titles = ["Stock Wazuh 4.14.6", "After 37 engineered rules"]
+
+    for ax, scores, title in zip(axes, panels, titles):
+        tally = {0: 0, 1: 0, 2: 0, 3: 0}
+        last_tactic = None
+        yy = 0
+        ylabels, ypos = [], []
+        for tid, name, tactic in TECHNIQUES:
+            if tactic != last_tactic:
+                if last_tactic is not None:
+                    yy += 0.55
+                ax.text(-0.06, yy, tactic.upper(), fontsize=7.5, fontweight="bold",
+                        color="#34495e", ha="left", va="center", transform=ax.get_yaxis_transform())
+                yy += 0.9
+                last_tactic = tactic
+            s = scores[tid]
+            tally[s] += 1
+            ax.barh(yy, 1.0, color=SCORE_COLOURS[s], height=0.78, left=0)
+            ax.text(0.5, yy, str(s), ha="center", va="center", fontsize=11,
+                    fontweight="bold", color="white")
+            ylabels.append(f"{tid}  {name}")
+            ypos.append(yy)
+            yy += 1.0
+
+        ax.set_yticks(ypos)
+        ax.set_yticklabels(ylabels, fontsize=8.5)
+        ax.invert_yaxis()
+        ax.set_xticks([])
+        ax.set_xlim(0, 1)
+        for sp in ("top", "right", "bottom", "left"):
+            ax.spines[sp].set_visible(False)
+        ax.tick_params(length=0)
+        ax.set_title(f"{title}\n"
+                     f"{tally[0]} blind · {tally[1]} parent-only · "
+                     f"{tally[2]} detected · {tally[3]} discriminating",
+                     fontsize=10, fontweight="bold", pad=10)
+
+    fig.legend(handles=[Patch(color=SCORE_COLOURS[i], label=SCORE_LABELS[i]) for i in range(4)],
+               loc="lower center", ncol=2, fontsize=8, frameon=False,
+               bbox_to_anchor=(0.5, -0.10))
+    fig.text(0.5, -0.145,
+             "Every blind spot closed; discriminating detections fell from 3 to 1. Coverage and "
+             "discrimination are different problems, and rule engineering only solves the first.",
+             ha="center", fontsize=8.5, style="italic", color="#444")
+    fig.tight_layout()
+    save(fig, "fig7_coverage_comparison.svg")
+
+
+def fig_intent_vs_mechanism(rows):
+    """
+    ⭐ THE STUDY'S CENTRAL CLAIM, AND IT HAD NO FIGURE.
+
+    Three pairs where the SAME technique, sensor, author and day produce opposite results depending
+    only on whether the rule keys on the mechanism or on the object. Counts are computed here, in the
+    technique's own windows - `100310` also fires 9 benign alerts inside T1003.001 windows, so its
+    dataset-wide figure is 10/19 and only the within-technique count is a fair comparison.
+    """
+    pairs = [
+        ("T1003.001", "100320", "any process opening LSASS", "100321", "…with a memory-read access mask"),
+        ("T1112", "100262", "any registry write", "100260", "…to a known persistence key"),
+        ("T1070.004", "100310", "any file deletion", "100311", "…of Prefetch / event logs / shadows"),
+    ]
+
+    def counts(rid, tid):
+        sel = [r for r in rows if r["rule_id"] == rid and r["technique_id"] == tid]
+        return (sum(1 for r in sel if r["class"] == "attack"),
+                sum(1 for r in sel if r["class"] == "benign"))
+
+    fig, ax = plt.subplots(figsize=(9.6, 5.4))
+    xt, xl, pos = [], [], 0
+    for tid, mrule, mdesc, irule, idesc in pairs:
+        for rid, desc, kind in ((mrule, mdesc, "MECHANISM"), (irule, idesc, "OBJECT")):
+            a, b = counts(rid, tid)
+            ax.bar(pos, a, width=0.62, color=ATK, alpha=0.92)
+            ax.bar(pos, b, width=0.62, bottom=a, color=BEN, alpha=0.92)
+            ax.text(pos, a / 2, str(a), ha="center", va="center", fontsize=10,
+                    fontweight="bold", color="white")
+            if b:
+                ax.text(pos, a + b / 2, str(b), ha="center", va="center", fontsize=10,
+                        fontweight="bold", color="white")
+            verdict = "separates" if b == 0 else "fires on both"
+            ax.text(pos, a + b + 0.9, f"{a} / {b}\n{verdict}", ha="center", fontsize=8,
+                    color="#1e8449" if b == 0 else "#c0392b",
+                    fontweight="bold" if b == 0 else "normal")
+            xt.append(pos)
+            # ⚠️ Descriptions are wrapped, not printed raw. Un-wrapped, "any process opening LSASS"
+            # and "...with a memory-read access mask" overrun their 1-unit bar spacing and print
+            # across each other - unreadable, and invisible in the render log.
+            xl.append(f"{kind}\n{rid}\n" + textwrap.fill(desc, 15))
+            pos += 1
+        pos += 0.75
+
+    ax.set_xticks(xt)
+    ax.set_xticklabels(xl, fontsize=7.6)
+    style(ax, "The convergent finding — what the rule keys on decides whether it discriminates",
+          ylabel="Alerts in the technique's own windows")
+    # Headroom for the per-pair verdict labels AND the technique captions above them.
+    ax.set_ylim(0, 32)
+    ax.legend(handles=[Patch(color=ATK, label="attack"), Patch(color=BEN, label="benign")],
+              fontsize=8.5, frameon=False, loc="upper right", ncol=2)
+
+    for i, (tid, *_rest) in enumerate(pairs):
+        ax.text(i * 2.75 + 0.5, 28.6, tid, ha="center", fontsize=10, fontweight="bold",
+                color="#34495e")
+        ax.plot([i * 2.75 - 0.34, i * 2.75 + 1.34], [27.6, 27.6],
+                color="#bdc3c7", linewidth=1.1)
+
+    fig.text(0.5, -0.13,
+             "Same technique, same sensor, same author, same day — only the match condition differs. "
+             "T1003.001 is the strongest case: the benign mirror runs a character-identical command "
+             "line, so nothing in the command line can separate the classes and only the sensor's "
+             "access-mask field does.",
+             ha="center", fontsize=8, style="italic", color="#444", wrap=True)
+    save(fig, "fig8_intent_vs_mechanism.svg")
 
 
 # =========================================================================================
@@ -340,7 +541,10 @@ def main():
              ("Severity ≥ 12", 0.281)]
     fig_baselines(order)
 
-    print("\nAll six figures written to ml/figures/")
+    fig_coverage_grid()
+    fig_intent_vs_mechanism(rows)
+
+    print("\nAll eight figures written to ml/figures/")
 
 
 if __name__ == "__main__":

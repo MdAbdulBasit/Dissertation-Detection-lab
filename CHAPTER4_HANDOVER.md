@@ -469,12 +469,16 @@ never "none".**
 | 4 | `ml/figures/fig4_operating_points.svg` | Recall vs analyst workload — deployability |
 | 5 | `ml/figures/fig5_severity_vs_truth.svg` | **Severity anti-correlated with truth** |
 | 6 | `ml/figures/fig6_rule_baselines.svg` | Model vs the ruleset, against "escalate everything" |
-| 7 | `navigator_layers/figures/01_default_ruleset_v19.svg` | Coverage, stock Wazuh |
-| 8 | `navigator_layers/figures/02_custom_ruleset_v19.svg` | Coverage, engineered ruleset |
+| **7** | `ml/figures/fig7_coverage_comparison.svg` | **Coverage, default vs engineered — use this, not the Navigator export** |
+| **8** | `ml/figures/fig8_intent_vs_mechanism.svg` | ⭐ **The convergent finding — three matched pairs** |
+| A1 | `navigator_layers/figures/01_default_ruleset_v19.svg` | *Appendix* — full enterprise matrix, stock |
+| A2 | `navigator_layers/figures/02_custom_ruleset_v19.svg` | *Appendix* — full enterprise matrix, engineered |
 
-**Suggested pairings.** Figures 7+8 side by side are the coverage story. **Figures 1 and 4 must be
-published together** — Figure 1 alone understates the miss rate, Figure 4 alone hides it. Figure 5 is
-the most striking single result and currently has no equivalent in the text.
+**Suggested pairings.** **Figure 7 is the coverage story** — the full-matrix exports A1/A2 render ~600
+techniques to show 15 and are unreadable at A4, so they belong in the appendix as evidence while
+Figure 7 goes in the chapter. **Figures 1 and 4 must be published together** — Figure 1 alone
+understates the 24.5% miss rate, Figure 4 alone hides it. **Figure 8 is the one to lead the chapter
+with**: it is the central claim, and it had no visual until now.
 
 ⚠️ **Three of the six ML figures were unusable on first render** — overlapping labels in figs 3, 5 and 6
 — while the script logged success every time. Fixed and re-inspected. **Re-render and look at the image
