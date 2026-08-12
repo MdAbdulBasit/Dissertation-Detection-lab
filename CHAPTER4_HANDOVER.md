@@ -6,8 +6,11 @@
 > **Purpose.** This document answers the checklist from the writing session and states, item by item,
 > what exists and how it was verified. **All three open decisions are now RESOLVED** — the failure-mode
 > taxonomy is fixed at eight, the alert-fatigue figure is `92213` at 115/5, and the FP-reduction result
-> leads with the mechanism. See §11. **Nothing here is awaiting your judgement; the remaining work is
-> selection — deciding what fits a 2,000–2,500 word chapter.**
+> leads with the mechanism. See §11.
+>
+> ⚠️ **READ §11b FIRST. Chapter 4 is 1,500 words, not 2,500.** Three figures in the body, not four or
+> eight. **Most of what follows belongs in an appendix, in Chapter 5, or in Chapter 6** — §11b says
+> which, section by section. This document is the evidence base, not a chapter outline.
 
 ---
 
@@ -423,7 +426,13 @@ taxonomy in `COVERAGE_TABLE.md` exists to prevent — conflating cause (3) or (1
 - **ATT&CK v19 drift** (§7).
 - **Rule `100201`** (T1087.001 PowerShell-cmdlet blind spot) documented but not built — future work.
 
-### 9.0 ⭐ Silent tooling failure is the dominant threat to a study like this
+### 9.0 ⭐ Silent tooling failure — **CHAPTER 6 MATERIAL, not Chapter 4**
+
+> 📍 **Destination: Chapter 6, Critical Reflection (1,500 words).** This is a reflection on research
+> method, not a finding, and it maps directly onto the marking criterion *"the student's reflection on
+> problems and proposed ways to address them"* — one of two things the brief explicitly says is looked
+> for. In Chapter 4 it would consume material a 1,500-word findings chapter cannot spare; in Chapter 6
+> it has room and it answers the question being asked. **Do not draft this into Chapter 4.**
 
 **Not a list of mishaps — a methodological finding, and the one most likely to transfer.** Across the
 project, **seven distinct defects reached a committed artefact. Not one announced itself.** Every tool
@@ -531,16 +540,86 @@ output and looking at it.
 | A1 | `navigator_layers/figures/01_default_ruleset_v19.svg` | *Appendix* — full enterprise matrix, stock |
 | A2 | `navigator_layers/figures/02_custom_ruleset_v19.svg` | *Appendix* — full enterprise matrix, engineered |
 
-**Suggested pairings.** **Figure 7 is the coverage story** — the full-matrix exports A1/A2 render ~600
-techniques to show 15 and are unreadable at A4, so they belong in the appendix as evidence while
-Figure 7 goes in the chapter. **Figures 1 and 4 must be published together** — Figure 1 alone
-understates the 24.5% miss rate, Figure 4 alone hides it. **Figure 8 is the one to lead the chapter
-with**: it is the central claim, and it had no visual until now.
+### ⭐ Only THREE go in the body — the chapter is 1,500 words
+
+At ~150 words of surrounding text per figure, four figures is 600 words: **40% of the chapter.** Three
+is the affordable number.
+
+| Figure | Placement | Why |
+|---|---|---|
+| **8** — intent vs mechanism | **Body — leads the chapter** | The central claim, and it had no visual until now |
+| **7** — coverage comparison | **Body** | Carries 7/1/4/3 → 0/0/14/1. The full-matrix exports A1/A2 are unreadable at A4 |
+| **4** — operating points | **Body** | The deployability reality; stops the 99.7% reading as a boast |
+| 1 — confusion matrix | **Inline sentence, not a figure** | See below |
+| 2, 3, 5, 6 | Appendix | Promote **5** first if room appears — severity anti-correlation is the most surprising result and has no prose equivalent |
+| A1, A2 — full matrices | Appendix | Citable coverage evidence; ~600 techniques rendered to show 15 |
+
+**Figure 1 becomes a sentence.** The honesty pairing with Figure 4 is preserved at a twentieth of the
+cost:
+
+> *"At the default threshold the model misses 24.5% of attacks while false-alarming on only 8.2% of
+> benign activity."*
+
+**20 words instead of 150.** The confusion matrix itself goes to appendix. This is the single cheapest
+saving available and it costs nothing analytically — the asymmetry is the point, not the grid.
 
 ⚠️ **Three of the six ML figures were unusable on first render** — overlapping labels in figs 3, 5 and 6
 — while the script logged success every time. Fixed and re-inspected. **Re-render and look at the image
 after any change**; layout defects are invisible to every other check. Same lesson as the Navigator
 layers, which validated perfectly as JSON and drew 5 of 15 techniques.
+
+---
+
+## 11b. ⭐ WORD BUDGET — this governs everything above
+
+**Total ~8,200 words. There is no slack anywhere.** Most of the material in this handover **cannot** go
+in Chapter 4; it goes to appendices and to Chapters 5 and 6, cited from the text.
+
+| Chapter | Words |
+|---|---|
+| 1 Introduction | 700–800 |
+| 2 Literature Review | 1,000 |
+| 3 Methodology | 1,000 |
+| **4 Findings** | **1,500** |
+| 5 Discussion | 1,500 |
+| 6 Critical Reflection | 1,500 |
+| 7 Conclusion | 1,000 |
+
+### Chapter 4 section budget — 1,500 words including figures
+
+| Section | Words | Figure |
+|---|---|---|
+| Chapter intro | 80 | — |
+| Coverage: what 37 rules bought | 300 | **Fig 7** |
+| The convergent finding | 350 | **Fig 8** |
+| The sensor ceiling, three shapes | 200 | — |
+| ML results + robustness check | 250 | — (Fig 1 as an inline sentence) |
+| Baseline comparison + operating point | 250 | **Fig 4** |
+| Mini-conclusion | 70 | — |
+| **Total** | **1,500** | **3 figures** |
+
+### Where the rest of this document goes
+
+| Material | Destination |
+|---|---|
+| §3 eight failure modes | **One-line table in Ch4** + appendix pointer to `COVERAGE_TABLE.md` |
+| §3.1 T1087.001 1:1 re-attribution | Ch4, inside the coverage section — it is 2 sentences |
+| §5.2 `92213` 115/5 | Ch4 or Ch5, one sentence — high value per word |
+| §6 full ML tables | Appendix; Ch4 quotes headline figures only |
+| §9.0 silent tooling failure | **Chapter 6** — see the banner on that section |
+| §9.1 four leakage layers | **Chapter 6** (method reflection), one line in Ch4 limitations |
+| §9 remaining limitations | Split: hard constraints → Ch4 close; method → Ch6 |
+| §10 surprises | **Chapter 5** — that is Discussion's job |
+| Per-technique detail, correction history, artefact taxonomy | Appendix |
+
+**Drafting approach: write section by section against these targets, not long-then-cut.** At this
+density a 6,000-word draft would need two thirds removed, and the cutting would fall on whatever was
+written last rather than whatever matters least.
+
+⚠️ **CONFIRM THE DEADLINE.** Two dates are in circulation: **1 September 2026** — recorded in
+`README.md` line 84, the only place in the repository that states it — and **3 September**, on the
+module slides. **Verify which applies and correct `README.md` to match.** A two-day error at this
+stage is not recoverable.
 
 ---
 
