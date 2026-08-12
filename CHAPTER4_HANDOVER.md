@@ -400,6 +400,37 @@ taxonomy in `COVERAGE_TABLE.md` exists to prevent — conflating cause (3) or (1
 - **ATT&CK v19 drift** (§7).
 - **Rule `100201`** (T1087.001 PowerShell-cmdlet blind spot) documented but not built — future work.
 
+### 9.0 ⭐ Silent tooling failure is the dominant threat to a study like this
+
+**Not a list of mishaps — a methodological finding, and the one most likely to transfer.** Across the
+project, **seven distinct defects reached a committed artefact. Not one announced itself.** Every tool
+involved reported success.
+
+| # | What failed | What the tool reported | How it was caught |
+|---|---|---|---|
+| 1 | Sysmon discarded every `FileDeleteDetected` event — schema declared `4.50`, feature needs `4.60+` | ***"Configuration file validated"*** and *"Configuration updated"* | Probing for EID 26 directly after rules that should have fired didn't |
+| 2 | Export de-duplication deleted three vendor rules (`92031`, `92039`, `92040`) by keying on process image | Ran clean; row counts merely looked lower | Noticing a rule cited in the write-up had no rows |
+| 3 | Four stale counts (`551`, `258`, `4,636`, `~14%`) survived pipeline changes, one in a *summary-counter* row | Nothing checks prose | Recomputing before quoting |
+| 4 | Navigator layers rendered **5 of 15** techniques — sub-techniques need an expanded parent row | Valid JSON, correct scores, correct tactics | Opening the file in the Navigator |
+| 5 | First SVG export contained **5 of 15** techniques — exports what is on screen | Download succeeded | Grepping the SVG for expected labels |
+| 6 | Three of six ML figures unusable — overlapping labels | Script logged success six times | Rendering to PNG and looking |
+| 7 | Two coverage-table rows broken — one split across twelve lines, one with two extra columns | GitHub renders the mess without complaint | Counting cells on unescaped pipes |
+
+**The pattern: validation checks structure, and structure was almost always fine. What failed was
+meaning — and meaning is only visible in the rendered output.** A config that loads is not a config
+that works; valid JSON is not a readable figure; a script that exits zero has not necessarily drawn
+anything legible.
+
+Three defences emerged, and they are the transferable contribution:
+
+- **Probe for the effect, never trust the acknowledgement** (defect 1).
+- **Recompute every number at the point of use; treat prose as a pointer, not a source** (defects 2, 3).
+- **Render and look — there is no substitute** (defects 4, 5, 6, 7).
+
+`scripts/check_docs.py` mechanises what can be mechanised. **It cannot catch defects 4, 5 or 6**, which
+is precisely the point: the residual risk in this class of work is not analytical, it is
+infrastructural, and it is only reachable by inspecting output a human can read.
+
 ### 9.1 Four layers of data leakage, each of which looked like signal
 
 **This is the most transferable methodological finding in the project.**
