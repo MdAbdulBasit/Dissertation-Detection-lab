@@ -1,0 +1,63 @@
+# ==============================================================================================
+# ⚠️  PROVENANCE — BACK-TRANSLATED, NOT AUTHORED SIGMA-FIRST
+#
+#   This rule was generated on 2026-08-12 by scripts/wazuh_to_sigma.py from the DEPLOYED
+#   Wazuh rules in wazuh_rules/local_rules.xml. The Wazuh XML was written first, during
+#   the measurement runs; this Sigma file did not exist at that time.
+#
+#   Three techniques in this directory WERE authored Sigma-first and translated to Wazuh
+#   afterwards, by hand, with implementation notes: T1087.001, T1082, T1136.001.
+#   This is not one of them. Chapter 3 must not describe all twelve as Sigma-first.
+#
+#   What this file legitimately shows: the deployed detection logic is expressible in a
+#   vendor-neutral form and is portable to another SIEM.
+# ==============================================================================================
+
+title: System Network Configuration Discovery (T1016) — custom detection
+id: t1016-backtranslated-c5038891
+status: experimental
+description: |
+  Custom detection for T1016 System Network Configuration Discovery, deployed and measured in an MSc detection-engineering
+  study on Wazuh 4.14.6. Covers 3 deployed rule(s): 100250, 100251, 100252.
+
+  100251 and 100252 are attack-only because the benign mirror ran ipconfig/route/arp but not
+  `netsh show` or `net config`. Excluded from any separability claim.
+references:
+  - https://attack.mitre.org/techniques/T1016/
+  - https://github.com/redcanaryco/atomic-red-team/blob/master/atomics/T1016/T1016.md
+author: Abdul Basit Mohammed (c5038891), Sheffield Hallam University
+date: 2026-08-12
+tags:
+  - attack.discovery
+  - attack.t1016
+logsource:
+  product: windows
+  category: process_creation
+  definition: |
+    Sysmon EID 1. In Wazuh these rules chain from sysmon_eid1_detections via if_group/if_sid,
+    which has no Sigma equivalent — Sigma matches events directly rather than other rules.
+    ⚠️ Rules chaining from `sysmon_eid1_detections` only see events a VENDOR rule already
+    matched, so they inherit its blind spots. That constraint disappears in Sigma.
+detection:
+  wazuh_100250:   # Wazuh rule 100250, level 8 — T1016 System Network Configuration Discovery via native network utilit
+    OriginalFileName|re: '(?i)^(ipconfig|arp|route|nbtstat|netstat|nslookup)\.exe$'
+
+  wazuh_100251:   # Wazuh rule 100251, level 8 — T1016 System Network Configuration Discovery via netsh enumeration
+    OriginalFileName|re: '(?i)^netsh\.exe$'
+    CommandLine|re: '(?i)\bshow\b'
+
+  wazuh_100252:   # Wazuh rule 100252, level 8 — T1016 System Network Configuration Discovery via net config
+    OriginalFileName|re: '(?i)^net1?\.exe$'
+    CommandLine|re: '(?i)\s+config\b'
+
+  condition: wazuh_100250 or wazuh_100251 or wazuh_100252
+falsepositives:
+  - See MEASURED CAVEAT in the description — these counts were observed, not estimated.
+  - Routine administration. Measured in this lab as a both-classes signal for most rules,
+    so this is a triage input rather than a standalone verdict.
+level: medium
+---
+# Deployed Wazuh mapping
+#   100250  L8   sysmon_eid1_detections     T1016 System Network Configuration Discovery via native network utility
+#   100251  L8   sysmon_eid1_detections     T1016 System Network Configuration Discovery via netsh enumeration
+#   100252  L8   sysmon_eid1_detections     T1016 System Network Configuration Discovery via net config

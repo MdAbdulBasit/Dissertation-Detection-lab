@@ -1,0 +1,65 @@
+# ==============================================================================================
+# ⚠️  PROVENANCE — BACK-TRANSLATED, NOT AUTHORED SIGMA-FIRST
+#
+#   This rule was generated on 2026-08-12 by scripts/wazuh_to_sigma.py from the DEPLOYED
+#   Wazuh rules in wazuh_rules/local_rules.xml. The Wazuh XML was written first, during
+#   the measurement runs; this Sigma file did not exist at that time.
+#
+#   Three techniques in this directory WERE authored Sigma-first and translated to Wazuh
+#   afterwards, by hand, with implementation notes: T1087.001, T1082, T1136.001.
+#   This is not one of them. Chapter 3 must not describe all twelve as Sigma-first.
+#
+#   What this file legitimately shows: the deployed detection logic is expressible in a
+#   vendor-neutral form and is portable to another SIEM.
+# ==============================================================================================
+
+title: Archive via Utility (T1560.001) — custom detection
+id: t1560-001-backtranslated-c5038891
+status: experimental
+description: |
+  Custom detection for T1560.001 Archive via Utility, deployed and measured in an MSc detection-engineering
+  study on Wazuh 4.14.6. Covers 3 deployed rule(s): 100330, 100331, 100332.
+
+  100330 and 100331 fire 0 attack / 5 benign each - the first by DISPLACEMENT (100332 at L12
+  outranks it), the second by MIRROR SCOPE (the atomic never uses PowerShell compression).
+  Mechanism-keyed archiving detection is 5/5; only object-keyed 100332 separates (5/0).
+references:
+  - https://attack.mitre.org/techniques/T1560/001/
+  - https://github.com/redcanaryco/atomic-red-team/blob/master/atomics/T1560.001/T1560.001.md
+author: Abdul Basit Mohammed (c5038891), Sheffield Hallam University
+date: 2026-08-12
+tags:
+  - attack.collection
+  - attack.t1003
+  - attack.t1560.001
+logsource:
+  product: windows
+  category: process_creation
+  definition: |
+    Sysmon EID 1. In Wazuh these rules chain from sysmon_eid1_detections via if_group/if_sid,
+    which has no Sigma equivalent — Sigma matches events directly rather than other rules.
+    ⚠️ Rules chaining from `sysmon_eid1_detections` only see events a VENDOR rule already
+    matched, so they inherit its blind spots. That constraint disappears in Sigma.
+detection:
+  wazuh_100330:   # Wazuh rule 100330, level 8 — T1560.001 Data archived using built-in utility $(win.eventdata.origina
+    OriginalFileName|re: '(?i)^(makecab|tar|compact|expand|wbadmin)(\.exe)?$'
+
+  wazuh_100331:   # Wazuh rule 100331, level 8 — T1560.001 Data archived via PowerShell compression: $(win.eventdata.co
+    OriginalFileName|re: '(?i)^powershell(\.exe)?$'
+    CommandLine|re: '(?i)(Compress-Archive|ZipFile\]?::CreateFromDirectory|Compress-7Zip|System\.IO\.Compression)'
+
+  wazuh_100332:   # Wazuh rule 100332, level 12 — T1560.001 Archive utility targeting credential material: $(win.eventda
+    OriginalFileName|re: '(?i)^(makecab|tar|compact|expand|wbadmin|powershell|pwsh)(\.exe)?$'
+    CommandLine|re: '(?i)(\\config\\(sam|security|system)\b|\bsam\.hiv\b|\bntds\.dit\b|\\Login Data\b|\blogins\.json\b|\\Local State\b|\bcredentials\b)'
+
+  condition: wazuh_100330 or wazuh_100331 or wazuh_100332
+falsepositives:
+  - See MEASURED CAVEAT in the description — these counts were observed, not estimated.
+  - Routine administration. Measured in this lab as a both-classes signal for most rules,
+    so this is a triage input rather than a standalone verdict.
+level: critical
+---
+# Deployed Wazuh mapping
+#   100330  L8   sysmon_eid1_detections     T1560.001 Data archived using built-in utility $(win.eventdata.originalFileNam
+#   100331  L8   sysmon_eid1_detections     T1560.001 Data archived via PowerShell compression: $(win.eventdata.commandLin
+#   100332  L12  sysmon_eid1_detections     T1560.001 Archive utility targeting credential material: $(win.eventdata.comma

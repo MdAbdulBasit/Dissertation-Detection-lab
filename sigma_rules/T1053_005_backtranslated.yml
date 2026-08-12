@@ -1,0 +1,59 @@
+# ==============================================================================================
+# ⚠️  PROVENANCE — BACK-TRANSLATED, NOT AUTHORED SIGMA-FIRST
+#
+#   This rule was generated on 2026-08-12 by scripts/wazuh_to_sigma.py from the DEPLOYED
+#   Wazuh rules in wazuh_rules/local_rules.xml. The Wazuh XML was written first, during
+#   the measurement runs; this Sigma file did not exist at that time.
+#
+#   Three techniques in this directory WERE authored Sigma-first and translated to Wazuh
+#   afterwards, by hand, with implementation notes: T1087.001, T1082, T1136.001.
+#   This is not one of them. Chapter 3 must not describe all twelve as Sigma-first.
+#
+#   What this file legitimately shows: the deployed detection logic is expressible in a
+#   vendor-neutral form and is portable to another SIEM.
+# ==============================================================================================
+
+title: Scheduled Task (T1053.005) — custom detection
+id: t1053-005-backtranslated-c5038891
+status: experimental
+description: |
+  Custom detection for T1053.005 Scheduled Task, deployed and measured in an MSc detection-engineering
+  study on Wazuh 4.14.6. Covers 2 deployed rule(s): 100270, 100271.
+
+  100270 fires 15 attack / 4 benign. Creating a scheduled task looks the same whoever does it,
+  because it is the same action.
+references:
+  - https://attack.mitre.org/techniques/T1053/005/
+  - https://github.com/redcanaryco/atomic-red-team/blob/master/atomics/T1053.005/T1053.005.md
+author: Abdul Basit Mohammed (c5038891), Sheffield Hallam University
+date: 2026-08-12
+tags:
+  - attack.persistence
+  - attack.t1053.005
+logsource:
+  product: windows
+  category: process_creation
+  definition: |
+    Sysmon EID 1. In Wazuh these rules chain from sysmon_eid1_detections via if_group/if_sid,
+    which has no Sigma equivalent — Sigma matches events directly rather than other rules.
+    ⚠️ Rules chaining from `sysmon_eid1_detections` only see events a VENDOR rule already
+    matched, so they inherit its blind spots. That constraint disappears in Sigma.
+detection:
+  wazuh_100270:   # Wazuh rule 100270, level 10 — T1053.005 Scheduled Task created or modified via schtasks
+    OriginalFileName|re: '(?i)^schtasks\.exe$'
+    CommandLine|re: '(?i)\s/(create|change)\b'
+
+  wazuh_100271:   # Wazuh rule 100271, level 10 — T1053.005 Scheduled Task created or modified via PowerShell or WMI
+    OriginalFileName|re: '(?i)^powershell(\.exe)?$'
+    CommandLine|re: '(?i)(Register-ScheduledTask|Set-ScheduledTask|New-ScheduledTask|MSFT_ScheduledTask)'
+
+  condition: wazuh_100270 or wazuh_100271
+falsepositives:
+  - See MEASURED CAVEAT in the description — these counts were observed, not estimated.
+  - Routine administration. Measured in this lab as a both-classes signal for most rules,
+    so this is a triage input rather than a standalone verdict.
+level: high
+---
+# Deployed Wazuh mapping
+#   100270  L10  sysmon_eid1_detections     T1053.005 Scheduled Task created or modified via schtasks
+#   100271  L10  sysmon_eid1_detections     T1053.005 Scheduled Task created or modified via PowerShell or WMI

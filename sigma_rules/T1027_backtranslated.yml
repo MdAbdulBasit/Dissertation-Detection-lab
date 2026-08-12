@@ -1,0 +1,50 @@
+# ==============================================================================================
+# ⚠️  PROVENANCE — BACK-TRANSLATED, NOT AUTHORED SIGMA-FIRST
+#
+#   This rule was generated on 2026-08-12 by scripts/wazuh_to_sigma.py from the DEPLOYED
+#   Wazuh rules in wazuh_rules/local_rules.xml. The Wazuh XML was written first, during
+#   the measurement runs; this Sigma file did not exist at that time.
+#
+#   Three techniques in this directory WERE authored Sigma-first and translated to Wazuh
+#   afterwards, by hand, with implementation notes: T1087.001, T1082, T1136.001.
+#   This is not one of them. Chapter 3 must not describe all twelve as Sigma-first.
+#
+#   What this file legitimately shows: the deployed detection logic is expressible in a
+#   vendor-neutral form and is portable to another SIEM.
+# ==============================================================================================
+
+title: T1027 (T1027) — custom detection
+id: t1027-backtranslated-c5038891
+status: experimental
+description: |
+  Custom detection for T1027 T1027, deployed and measured in an MSc detection-engineering
+  study on Wazuh 4.14.6. Covers 1 deployed rule(s): 100263.
+references:
+  - https://attack.mitre.org/techniques/T1027/
+  - https://github.com/redcanaryco/atomic-red-team/blob/master/atomics/T1027/T1027.md
+author: Abdul Basit Mohammed (c5038891), Sheffield Hallam University
+date: 2026-08-12
+tags:
+  - attack.execution
+  - attack.t1027
+  - attack.t1112
+logsource:
+  product: windows
+  category: process_creation
+  definition: |
+    Sysmon EID 1. In Wazuh these rules chain from 92041 via if_group/if_sid,
+    which has no Sigma equivalent — Sigma matches events directly rather than other rules.
+    ⚠️ Rules chaining from `sysmon_eid1_detections` only see events a VENDOR rule already
+    matched, so they inherit its blind spots. That constraint disappears in Sigma.
+detection:
+  wazuh_100263:   # Wazuh rule 100263, level 12 — T1112 Registry value written with a genuine base64 payload via reg.exe
+    CommandLine|re: '(?i)\s\/d\s+"?[A-Za-z0-9+\/]{16,}={0,2}\b'
+
+  condition: wazuh_100263
+falsepositives:
+  - Routine administration. Measured in this lab as a both-classes signal for most rules,
+    so this is a triage input rather than a standalone verdict.
+level: critical
+---
+# Deployed Wazuh mapping
+#   100263  L12  92041                      T1112 Registry value written with a genuine base64 payload via reg.exe

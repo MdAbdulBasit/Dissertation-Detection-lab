@@ -1,0 +1,73 @@
+# ==============================================================================================
+# ⚠️  PROVENANCE — BACK-TRANSLATED, NOT AUTHORED SIGMA-FIRST
+#
+#   This rule was generated on 2026-08-12 by scripts/wazuh_to_sigma.py from the DEPLOYED
+#   Wazuh rules in wazuh_rules/local_rules.xml. The Wazuh XML was written first, during
+#   the measurement runs; this Sigma file did not exist at that time.
+#
+#   Three techniques in this directory WERE authored Sigma-first and translated to Wazuh
+#   afterwards, by hand, with implementation notes: T1087.001, T1082, T1136.001.
+#   This is not one of them. Chapter 3 must not describe all twelve as Sigma-first.
+#
+#   What this file legitimately shows: the deployed detection logic is expressible in a
+#   vendor-neutral form and is portable to another SIEM.
+# ==============================================================================================
+
+title: File Deletion (T1070.004) — custom detection
+id: t1070-004-backtranslated-c5038891
+status: experimental
+description: |
+  Custom detection for T1070.004 File Deletion, deployed and measured in an MSc detection-engineering
+  study on Wazuh 4.14.6. Covers 4 deployed rule(s): 100310, 100311, 100312, 100313.
+
+  100310 fires 10 attack / 10 benign in its own windows and 10/19 dataset-wide. Only 100311,
+  which keys on WHAT is deleted, separates (5/0). Requires Sysmon schemaversion 4.60+ for EID
+  26; 4.50 silently discards the events.
+references:
+  - https://attack.mitre.org/techniques/T1070/004/
+  - https://github.com/redcanaryco/atomic-red-team/blob/master/atomics/T1070.004/T1070.004.md
+author: Abdul Basit Mohammed (c5038891), Sheffield Hallam University
+date: 2026-08-12
+tags:
+  - attack.defense_evasion
+  - attack.t1070.001
+  - attack.t1070.004
+logsource:
+  product: windows
+  category: process_creation
+  definition: |
+    Sysmon EID 1. In Wazuh these rules chain from sysmon_eid1_detections, sysmon_event_26 via if_group/if_sid,
+    which has no Sigma equivalent — Sigma matches events directly rather than other rules.
+    ⚠️ Rules chaining from `sysmon_eid1_detections` only see events a VENDOR rule already
+    matched, so they inherit its blind spots. That constraint disappears in Sigma.
+detection:
+  wazuh_100310:   # Wazuh rule 100310, level 8 — T1070.004 File or folder deleted via command line: $(win.eventdata.com
+    OriginalFileName|re: '(?i)^(cmd|powershell|pwsh)(\.exe)?$'
+    CommandLine|re: '(?i)(\s(del|erase)\s+[/"a-z]|\s(rmdir|rd)\s+/s|Remove-Item)'
+
+  wazuh_100311:   # Wazuh rule 100311, level 10 — T1070.004 Deletion of forensic artefact: $(win.eventdata.commandLine)
+    OriginalFileName|re: '(?i)^(cmd|powershell|pwsh|wevtutil|fsutil|vssadmin)(\.exe)?$'
+    CommandLine|re: '(?i)(\\Prefetch\\|\\winevt\\Logs|wevtutil(\.exe)?"?\s+(cl|clear-log)\b|usn\s+deletejournal|Recycle\.Bin|vssadmin(\.exe)?"?\s+delete\s+shadows)'
+
+  wazuh_100312:   # Wazuh rule 100312, level 8 — T1070.004 File deleted from disk by $(win.eventdata.image): $(win.even
+    EventID: 1
+  filter_100312:   # negated in the Wazuh rule; Sigma expresses this in the condition
+    Image|re: '(?i)\\svchost\.exe$'
+
+  wazuh_100313:   # Wazuh rule 100313, level 10 — T1070.004 Forensic artefact deleted from disk: $(win.eventdata.targetF
+    TargetFilename|re: '(?i)(\\Prefetch\\|\\winevt\\Logs\\)'
+  filter_100313:   # negated in the Wazuh rule; Sigma expresses this in the condition
+    Image|re: '(?i)\\svchost\.exe$'
+
+  condition: wazuh_100310 or wazuh_100311 or (wazuh_100312 and not filter_100312) or (wazuh_100313 and not filter_100313)
+falsepositives:
+  - See MEASURED CAVEAT in the description — these counts were observed, not estimated.
+  - Routine administration. Measured in this lab as a both-classes signal for most rules,
+    so this is a triage input rather than a standalone verdict.
+level: high
+---
+# Deployed Wazuh mapping
+#   100310  L8   sysmon_eid1_detections     T1070.004 File or folder deleted via command line: $(win.eventdata.commandLine
+#   100311  L10  sysmon_eid1_detections     T1070.004 Deletion of forensic artefact: $(win.eventdata.commandLine)
+#   100312  L8   sysmon_event_26            T1070.004 File deleted from disk by $(win.eventdata.image): $(win.eventdata.ta
+#   100313  L10  sysmon_event_26            T1070.004 Forensic artefact deleted from disk: $(win.eventdata.targetFilename)

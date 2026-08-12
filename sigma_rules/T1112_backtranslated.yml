@@ -1,0 +1,72 @@
+# ==============================================================================================
+# ⚠️  PROVENANCE — BACK-TRANSLATED, NOT AUTHORED SIGMA-FIRST
+#
+#   This rule was generated on 2026-08-12 by scripts/wazuh_to_sigma.py from the DEPLOYED
+#   Wazuh rules in wazuh_rules/local_rules.xml. The Wazuh XML was written first, during
+#   the measurement runs; this Sigma file did not exist at that time.
+#
+#   Three techniques in this directory WERE authored Sigma-first and translated to Wazuh
+#   afterwards, by hand, with implementation notes: T1087.001, T1082, T1136.001.
+#   This is not one of them. Chapter 3 must not describe all twelve as Sigma-first.
+#
+#   What this file legitimately shows: the deployed detection logic is expressible in a
+#   vendor-neutral form and is portable to another SIEM.
+# ==============================================================================================
+
+title: Modify Registry (T1112) — custom detection
+id: t1112-backtranslated-c5038891
+status: experimental
+description: |
+  Custom detection for T1112 Modify Registry, deployed and measured in an MSc detection-engineering
+  study on Wazuh 4.14.6. Covers 5 deployed rule(s): 100260, 100261, 100262, 100263, 100264.
+
+  100262 fires 10 attack / 10 benign - registry writes are not adversarial. Only 100260, which
+  keys on WHICH key is written, separates the classes (20/0).
+references:
+  - https://attack.mitre.org/techniques/T1112/
+  - https://github.com/redcanaryco/atomic-red-team/blob/master/atomics/T1112/T1112.md
+author: Abdul Basit Mohammed (c5038891), Sheffield Hallam University
+date: 2026-08-12
+tags:
+  - attack.defense_evasion
+  - attack.t1027
+  - attack.t1112
+  - attack.t1562.001
+logsource:
+  product: windows
+  category: process_creation
+  definition: |
+    Sysmon EID 1. In Wazuh these rules chain from 92041, sysmon_event_13 via if_group/if_sid,
+    which has no Sigma equivalent — Sigma matches events directly rather than other rules.
+    ⚠️ Rules chaining from `sysmon_eid1_detections` only see events a VENDOR rule already
+    matched, so they inherit its blind spots. That constraint disappears in Sigma.
+detection:
+  wazuh_100260:   # Wazuh rule 100260, level 12 — T1112 Security control or logging policy DISABLED via registry: $(win.
+    TargetObject|re: '(?i)\\\\(Policies\\\\Microsoft\\\\Windows\\\\(PowerShell|EventLog|System|WindowsUpdate)|Policies\\\\Microsoft\\\\Windows Defender|Microsoft\\\\Windows Defender|CurrentControlSet\\\\Services\\\\(WinDefend|EventLog|Sysmon))\\\\'
+    Details|re: '(?i)DWORD\s*\(0x0+\)'
+
+  wazuh_100261:   # Wazuh rule 100261, level 8 — T1112 Security control or logging policy modified: $(win.eventdata.tar
+    TargetObject|re: '(?i)\\\\(Policies\\\\Microsoft\\\\Windows\\\\(PowerShell|EventLog|System|WindowsUpdate)|Policies\\\\Microsoft\\\\Windows Defender|Microsoft\\\\Windows Defender|CurrentControlSet\\\\Services\\\\(WinDefend|EventLog|Sysmon))\\\\'
+
+  wazuh_100262:   # Wazuh rule 100262, level 8 — T1112 Internet security zone configuration modified: $(win.eventdata.t
+    TargetObject|re: '(?i)\\\\Internet Settings\\\\(ZoneMap\\\\(ProtocolDefaults|Domains|EscDomains)|Zones)\\\\'
+
+  wazuh_100263:   # Wazuh rule 100263, level 12 — T1112 Registry value written with a genuine base64 payload via reg.exe
+    CommandLine|re: '(?i)\s\/d\s+"?[A-Za-z0-9+\/]{16,}={0,2}\b'
+
+  wazuh_100264:   # Wazuh rule 100264, level 10 — T1112 Registry value written via reg.exe (re-attributed from T1027 Obf
+    EventID: 1
+
+  condition: wazuh_100260 or wazuh_100261 or wazuh_100262 or wazuh_100263 or wazuh_100264
+falsepositives:
+  - See MEASURED CAVEAT in the description — these counts were observed, not estimated.
+  - Routine administration. Measured in this lab as a both-classes signal for most rules,
+    so this is a triage input rather than a standalone verdict.
+level: critical
+---
+# Deployed Wazuh mapping
+#   100260  L12  sysmon_event_13            T1112 Security control or logging policy DISABLED via registry: $(win.eventdat
+#   100261  L8   sysmon_event_13            T1112 Security control or logging policy modified: $(win.eventdata.targetObjec
+#   100262  L8   sysmon_event_13            T1112 Internet security zone configuration modified: $(win.eventdata.targetObj
+#   100263  L12  92041                      T1112 Registry value written with a genuine base64 payload via reg.exe
+#   100264  L10  92041                      T1112 Registry value written via reg.exe (re-attributed from T1027 Obfuscated 

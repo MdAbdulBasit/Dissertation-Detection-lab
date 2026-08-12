@@ -616,10 +616,14 @@ in Chapter 4; it goes to appendices and to Chapters 5 and 6, cited from the text
 density a 6,000-word draft would need two thirds removed, and the cutting would fall on whatever was
 written last rather than whatever matters least.
 
-⚠️ **CONFIRM THE DEADLINE.** Two dates are in circulation: **1 September 2026** — recorded in
-`README.md` line 84, the only place in the repository that states it — and **3 September**, on the
-module slides. **Verify which applies and correct `README.md` to match.** A two-day error at this
-stage is not recoverable.
+✅ **DEADLINE CONFIRMED: 3 September 2026.** `README.md` previously said 1 September and has been
+corrected. Two days recovered.
+
+⚠️ **METHODOLOGY WORDING — Chapter 3 needs one change.** Only **3 of 12** detections were authored
+Sigma-first (T1087.001, T1082, T1136.001); the other **9** were written directly as Wazuh XML and
+back-translated to Sigma on 2026-08-12. All twelve now exist, each back-translation carrying a
+provenance banner. **Chapter 3 must not claim all twelve were Sigma-first** — see
+`sigma_rules/README.md` for two defensible wordings.
 
 ---
 

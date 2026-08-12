@@ -1,0 +1,63 @@
+# ==============================================================================================
+# ⚠️  PROVENANCE — BACK-TRANSLATED, NOT AUTHORED SIGMA-FIRST
+#
+#   This rule was generated on 2026-08-12 by scripts/wazuh_to_sigma.py from the DEPLOYED
+#   Wazuh rules in wazuh_rules/local_rules.xml. The Wazuh XML was written first, during
+#   the measurement runs; this Sigma file did not exist at that time.
+#
+#   Three techniques in this directory WERE authored Sigma-first and translated to Wazuh
+#   afterwards, by hand, with implementation notes: T1087.001, T1082, T1136.001.
+#   This is not one of them. Chapter 3 must not describe all twelve as Sigma-first.
+#
+#   What this file legitimately shows: the deployed detection logic is expressible in a
+#   vendor-neutral form and is portable to another SIEM.
+# ==============================================================================================
+
+title: LSASS Memory (T1003.001) — custom detection
+id: t1003-001-backtranslated-c5038891
+status: experimental
+description: |
+  Custom detection for T1003.001 LSASS Memory, deployed and measured in an MSc detection-engineering
+  study on Wazuh 4.14.6. Covers 2 deployed rule(s): 100320, 100321.
+
+  The strongest measured result in the study: the benign mirror runs a character-identical
+  command line, so nothing in the command line can separate the classes. 100320 (any process
+  opening LSASS) fires 5/5; 100321, which adds the access-mask condition, fires 6/0.
+references:
+  - https://attack.mitre.org/techniques/T1003/001/
+  - https://github.com/redcanaryco/atomic-red-team/blob/master/atomics/T1003.001/T1003.001.md
+author: Abdul Basit Mohammed (c5038891), Sheffield Hallam University
+date: 2026-08-12
+tags:
+  - attack.credential_access
+  - attack.t1003.001
+  - attack.t1218.011
+logsource:
+  product: windows
+  category: process_creation
+  definition: |
+    Sysmon EID 1. In Wazuh these rules chain from sysmon_event1, sysmon_event_10 via if_group/if_sid,
+    which has no Sigma equivalent — Sigma matches events directly rather than other rules.
+    ⚠️ Rules chaining from `sysmon_eid1_detections` only see events a VENDOR rule already
+    matched, so they inherit its blind spots. That constraint disappears in Sigma.
+detection:
+  wazuh_100320:   # Wazuh rule 100320, level 10 — T1003.001 Process memory dumped via comsvcs.dll MiniDump: $(win.eventd
+    OriginalFileName|re: '(?i)^RUNDLL32\.EXE$'
+    CommandLine|re: '(?i)comsvcs\.dll[\s,"]+\s*MiniDump'
+
+  wazuh_100321:   # Wazuh rule 100321, level 12 — T1003.001 LSASS memory accessed by $(win.eventdata.sourceImage) with $
+    TargetImage|re: '(?i)\\lsass\.exe$'
+    GrantedAccess|re: '(?i)0x(1010|40|1410|1438|143a|1fffff|1f1fff|1f2fff|1f3fff)\b'
+  filter_100321:   # negated in the Wazuh rule; Sigma expresses this in the condition
+    SourceImage|re: '(?i)\\(wininit|services|csrss|lsass|svchost|MsMpEng|wazuh-agent)\.exe$'
+
+  condition: wazuh_100320 or (wazuh_100321 and not filter_100321)
+falsepositives:
+  - See MEASURED CAVEAT in the description — these counts were observed, not estimated.
+  - Routine administration. Measured in this lab as a both-classes signal for most rules,
+    so this is a triage input rather than a standalone verdict.
+level: critical
+---
+# Deployed Wazuh mapping
+#   100320  L10  sysmon_event1              T1003.001 Process memory dumped via comsvcs.dll MiniDump: $(win.eventdata.comm
+#   100321  L12  sysmon_event_10            T1003.001 LSASS memory accessed by $(win.eventdata.sourceImage) with $(win.eve

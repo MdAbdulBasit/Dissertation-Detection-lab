@@ -1,0 +1,65 @@
+# ==============================================================================================
+# ⚠️  PROVENANCE — BACK-TRANSLATED, NOT AUTHORED SIGMA-FIRST
+#
+#   This rule was generated on 2026-08-12 by scripts/wazuh_to_sigma.py from the DEPLOYED
+#   Wazuh rules in wazuh_rules/local_rules.xml. The Wazuh XML was written first, during
+#   the measurement runs; this Sigma file did not exist at that time.
+#
+#   Three techniques in this directory WERE authored Sigma-first and translated to Wazuh
+#   afterwards, by hand, with implementation notes: T1087.001, T1082, T1136.001.
+#   This is not one of them. Chapter 3 must not describe all twelve as Sigma-first.
+#
+#   What this file legitimately shows: the deployed detection logic is expressible in a
+#   vendor-neutral form and is portable to another SIEM.
+# ==============================================================================================
+
+title: Rundll32 (T1218.011) — custom detection
+id: t1218-011-backtranslated-c5038891
+status: experimental
+description: |
+  Custom detection for T1218.011 Rundll32, deployed and measured in an MSc detection-engineering
+  study on Wazuh 4.14.6. Covers 3 deployed rule(s): 100300, 100301, 100302.
+
+  100300 initially failed to fire on comsvcs.dll MiniDump because rundll32's parent was
+  powershell.exe rather than cmd.exe: every rule chaining from `sysmon_eid1_detections`
+  inherits the vendor's blind spots.
+references:
+  - https://attack.mitre.org/techniques/T1218/011/
+  - https://github.com/redcanaryco/atomic-red-team/blob/master/atomics/T1218.011/T1218.011.md
+author: Abdul Basit Mohammed (c5038891), Sheffield Hallam University
+date: 2026-08-12
+tags:
+  - attack.defense_evasion
+  - attack.t1218.011
+logsource:
+  product: windows
+  category: process_creation
+  definition: |
+    Sysmon EID 1. In Wazuh these rules chain from sysmon_eid1_detections via if_group/if_sid,
+    which has no Sigma equivalent — Sigma matches events directly rather than other rules.
+    ⚠️ Rules chaining from `sysmon_eid1_detections` only see events a VENDOR rule already
+    matched, so they inherit its blind spots. That constraint disappears in Sigma.
+detection:
+  wazuh_100300:   # Wazuh rule 100300, level 10 — T1218.011 Rundll32 proxy execution via known LOLBAS export: $(win.even
+    OriginalFileName|re: '(?i)^RUNDLL32\.EXE$'
+    CommandLine|re: '(?i)(pcwutl\.dll,\s*LaunchApplication|url\.dll,\s*(FileProtocolHandler|OpenURL)|zipfldr\.dll,\s*RouteTheCall|shell32\.dll,\s*(Control_RunDLL|ShellExec_RunDLL)|(ie)?advpack\.dll,\s*(LaunchINFSection|RegisterOCX)|(syssetup|setupapi)\.dll,\s*(InstallHinfSection|SetupInfObjectInstallAction)|desk\.cpl,\s*InstallScreenSaver|dfshim\.dll,\s*ShOpenVerbApplication|comsvcs\.dll,\s*MiniDump)'
+
+  wazuh_100301:   # Wazuh rule 100301, level 6 — T1218.011 Rundll32 loaded a DLL export: $(win.eventdata.commandLine)
+    OriginalFileName|re: '(?i)^RUNDLL32\.EXE$'
+    CommandLine|re: '(?i)\.(dll|cpl|ocx|inf)\s*,\s*\S'
+
+  wazuh_100302:   # Wazuh rule 100302, level 12 — T1218.011 Rundll32 proxy execution via script protocol handler
+    OriginalFileName|re: '(?i)^RUNDLL32\.EXE$'
+    CommandLine|re: '(?i)(vbscript:|javascript:|RunHTMLApplication)'
+
+  condition: wazuh_100300 or wazuh_100301 or wazuh_100302
+falsepositives:
+  - See MEASURED CAVEAT in the description — these counts were observed, not estimated.
+  - Routine administration. Measured in this lab as a both-classes signal for most rules,
+    so this is a triage input rather than a standalone verdict.
+level: critical
+---
+# Deployed Wazuh mapping
+#   100300  L10  sysmon_eid1_detections     T1218.011 Rundll32 proxy execution via known LOLBAS export: $(win.eventdata.co
+#   100301  L6   sysmon_eid1_detections     T1218.011 Rundll32 loaded a DLL export: $(win.eventdata.commandLine)
+#   100302  L12  sysmon_eid1_detections     T1218.011 Rundll32 proxy execution via script protocol handler

@@ -1,0 +1,65 @@
+# ==============================================================================================
+# ⚠️  PROVENANCE — BACK-TRANSLATED, NOT AUTHORED SIGMA-FIRST
+#
+#   This rule was generated on 2026-08-12 by scripts/wazuh_to_sigma.py from the DEPLOYED
+#   Wazuh rules in wazuh_rules/local_rules.xml. The Wazuh XML was written first, during
+#   the measurement runs; this Sigma file did not exist at that time.
+#
+#   Three techniques in this directory WERE authored Sigma-first and translated to Wazuh
+#   afterwards, by hand, with implementation notes: T1087.001, T1082, T1136.001.
+#   This is not one of them. Chapter 3 must not describe all twelve as Sigma-first.
+#
+#   What this file legitimately shows: the deployed detection logic is expressible in a
+#   vendor-neutral form and is portable to another SIEM.
+# ==============================================================================================
+
+title: Registry Run Keys / Startup Folder (T1547.001) — custom detection
+id: t1547-001-backtranslated-c5038891
+status: experimental
+description: |
+  Custom detection for T1547.001 Registry Run Keys / Startup Folder, deployed and measured in an MSc detection-engineering
+  study on Wazuh 4.14.6. Covers 4 deployed rule(s): 100290, 100291, 100292, 100294.
+
+  Default rule 92300 is correctly mapped and SILENT - suppressed severity, not a missing
+  detection.
+references:
+  - https://attack.mitre.org/techniques/T1547/001/
+  - https://github.com/redcanaryco/atomic-red-team/blob/master/atomics/T1547.001/T1547.001.md
+author: Abdul Basit Mohammed (c5038891), Sheffield Hallam University
+date: 2026-08-12
+tags:
+  - attack.persistence
+  - attack.t1547.001
+logsource:
+  product: windows
+  category: process_creation
+  definition: |
+    Sysmon EID 1. In Wazuh these rules chain from 92200, 92300, sysmon_event_13 via if_group/if_sid,
+    which has no Sigma equivalent — Sigma matches events directly rather than other rules.
+    ⚠️ Rules chaining from `sysmon_eid1_detections` only see events a VENDOR rule already
+    matched, so they inherit its blind spots. That constraint disappears in Sigma.
+detection:
+  wazuh_100290:   # Wazuh rule 100290, level 12 — T1547.001 Run key persistence with interpreter or staged payload: $(wi
+    Details|re: '(?i)(powershell|pwsh|cmd\.exe|mshta|rundll32|regsvr32|wscript|cscript|certutil|bitsadmin|-enc\b|-encodedcommand|FromBase64|https?:|\\\\AppData\\\\|\\\\Temp\\\\|\\\\Users\\\\Public\\\\|\.(bat|cmd|ps1|vbs|vbe|js|jse|hta|scr)\b)'
+
+  wazuh_100291:   # Wazuh rule 100291, level 8 — T1547.001 Autostart Run key written by $(win.eventdata.image)
+    EventID: 1
+
+  wazuh_100292:   # Wazuh rule 100292, level 10 — T1547.001 Autostart via policy Run key or Shell Folder redirection: $(
+    TargetObject|re: '(?i)CURRENTVERSION\\\\(POLICIES\\\\EXPLORER\\\\RUN|EXPLORER\\\\USER SHELL FOLDERS)'
+
+  wazuh_100294:   # Wazuh rule 100294, level 10 — T1547.001 Startup folder persistence written by $(win.eventdata.image)
+    TargetFilename|re: '(?i)\\\\Start Menu\\\\Programs\\\\Startup\\\\'
+
+  condition: wazuh_100290 or wazuh_100291 or wazuh_100292 or wazuh_100294
+falsepositives:
+  - See MEASURED CAVEAT in the description — these counts were observed, not estimated.
+  - Routine administration. Measured in this lab as a both-classes signal for most rules,
+    so this is a triage input rather than a standalone verdict.
+level: critical
+---
+# Deployed Wazuh mapping
+#   100290  L12  92300                      T1547.001 Run key persistence with interpreter or staged payload: $(win.eventd
+#   100291  L8   92300                      T1547.001 Autostart Run key written by $(win.eventdata.image)
+#   100292  L10  sysmon_event_13            T1547.001 Autostart via policy Run key or Shell Folder redirection: $(win.even
+#   100294  L10  92200                      T1547.001 Startup folder persistence written by $(win.eventdata.image) (re-att

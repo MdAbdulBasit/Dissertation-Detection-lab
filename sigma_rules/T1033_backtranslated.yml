@@ -1,0 +1,58 @@
+# ==============================================================================================
+# ⚠️  PROVENANCE — BACK-TRANSLATED, NOT AUTHORED SIGMA-FIRST
+#
+#   This rule was generated on 2026-08-12 by scripts/wazuh_to_sigma.py from the DEPLOYED
+#   Wazuh rules in wazuh_rules/local_rules.xml. The Wazuh XML was written first, during
+#   the measurement runs; this Sigma file did not exist at that time.
+#
+#   Three techniques in this directory WERE authored Sigma-first and translated to Wazuh
+#   afterwards, by hand, with implementation notes: T1087.001, T1082, T1136.001.
+#   This is not one of them. Chapter 3 must not describe all twelve as Sigma-first.
+#
+#   What this file legitimately shows: the deployed detection logic is expressible in a
+#   vendor-neutral form and is portable to another SIEM.
+# ==============================================================================================
+
+title: System Owner/User Discovery (T1033) — custom detection
+id: t1033-backtranslated-c5038891
+status: experimental
+description: |
+  Custom detection for T1033 System Owner/User Discovery, deployed and measured in an MSc detection-engineering
+  study on Wazuh 4.14.6. Covers 2 deployed rule(s): 100240, 100241.
+
+  100241 fires only in the attack class here, and that is MIRROR SCOPE rather than
+  discrimination - the benign mirror omits the mechanism it matches.
+references:
+  - https://attack.mitre.org/techniques/T1033/
+  - https://github.com/redcanaryco/atomic-red-team/blob/master/atomics/T1033/T1033.md
+author: Abdul Basit Mohammed (c5038891), Sheffield Hallam University
+date: 2026-08-12
+tags:
+  - attack.discovery
+  - attack.t1033
+logsource:
+  product: windows
+  category: process_creation
+  definition: |
+    Sysmon EID 1. In Wazuh these rules chain from sysmon_eid1_detections via if_group/if_sid,
+    which has no Sigma equivalent — Sigma matches events directly rather than other rules.
+    ⚠️ Rules chaining from `sysmon_eid1_detections` only see events a VENDOR rule already
+    matched, so they inherit its blind spots. That constraint disappears in Sigma.
+detection:
+  wazuh_100240:   # Wazuh rule 100240, level 8 — T1033 System Owner/User Discovery via whoami
+    OriginalFileName|re: '(?i)^whoami\.exe$'
+
+  wazuh_100241:   # Wazuh rule 100241, level 8 — T1033 System Owner/User Discovery via PowerShell identity enumeration
+    OriginalFileName|re: '(?i)^powershell(\.exe)?$'
+    CommandLine|re: '(?i)(WindowsIdentity|env:USERNAME|env:USERDOMAIN|::UserName|Get-LocalUser)'
+
+  condition: wazuh_100240 or wazuh_100241
+falsepositives:
+  - See MEASURED CAVEAT in the description — these counts were observed, not estimated.
+  - Routine administration. Measured in this lab as a both-classes signal for most rules,
+    so this is a triage input rather than a standalone verdict.
+level: medium
+---
+# Deployed Wazuh mapping
+#   100240  L8   sysmon_eid1_detections     T1033 System Owner/User Discovery via whoami
+#   100241  L8   sysmon_eid1_detections     T1033 System Owner/User Discovery via PowerShell identity enumeration

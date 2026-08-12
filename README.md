@@ -81,7 +81,7 @@ detonation window; XGBoost matches it to 0.004.
 administrator encoded *what was done to what*; every rule that failed encoded *how*.
 
 Scope: 15 techniques across 7 tactics and 5 Sysmon event types, approved with supervisor.
-Deadline **1 September 2026**.
+Deadline **3 September 2026** (confirmed 2026-08-12; this previously read 1 September).
 
 ## Working conventions
 
