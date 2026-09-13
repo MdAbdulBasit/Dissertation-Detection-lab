@@ -50,10 +50,8 @@ Custom rules: `/var/ossec/etc/rules/local_rules.xml` on Blue
 
 ## Progress
 
-## ✅ ALL PHASES COMPLETE — 2026-08-10. Only the write-up remains.
+## ✅ ALL PHASES COMPLETE — 2026-08-10. 
 
-**Start here:** [`CHAPTER4_HANDOVER.md`](CHAPTER4_HANDOVER.md) — every result, every figure, every
-open decision, in one document.
 
 **Phase 1 — lab build: complete.** Three VMs, attack → Sysmon → agent → SIEM verified end to end.
 
