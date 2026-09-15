@@ -1,8 +1,5 @@
 # Coverage summary — appendix table
 
-⚠️ **GENERATED FILE. Do not edit by hand.**
-Regenerate with `python3 scripts/build_coverage_summary.py` after any re-export.
-
 The compact, appendix-ready version of `COVERAGE_TABLE.md`, which is the ~90,000-character working
 record and is not readable as an appendix. Scores are read from `scripts/build_navigator_layers.py`, so
 this table cannot disagree with the Navigator figures. Counts come from `data/labelled_alerts.csv`.
