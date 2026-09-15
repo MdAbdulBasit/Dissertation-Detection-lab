@@ -53,7 +53,3 @@ contribution of this project.
 ⚠️ **`100293` is absent from the T1547.001 range.** It was written, found unreachable, and retired;
 the ID remains reserved so it cannot be reused.
 
-## Word formatting
-
-9 pt, left-aligned, bold header row, no hyphenation. Repeat Header Rows is not needed — 15 rows fit on
-one page. Suggested column widths: 0.8 / 2.2 / 5 / 3 / 3.5 / 3.5 / 1.8 / 1.8 cm.
